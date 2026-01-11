@@ -368,7 +368,7 @@ async def flexiroam_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     welcome_text = (
-        f"🌐 **Flexiroam 助手**\n"
+        f"🌐 **Flexiroam 自动化助手 (安全版)**\n"
         f"当前状态: {'✅ 运行中' if user_manager.get_config('bot_active', True) else '🔴 维护中'}\n\n"
         f"请选择操作："
     )
@@ -572,5 +572,5 @@ async def flexiroam_text_handler(update: Update, context: ContextTypes.DEFAULT_T
 def register_handlers(application):
     application.add_handler(CallbackQueryHandler(flexiroam_callback, pattern="^flexi_.*"))
     application.add_handler(CallbackQueryHandler(flexiroam_menu, pattern="^plugin_flexi_entry$"))
-    application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), flexiroam_text_handler))
+    application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), flexiroam_text_handler), group=1)
     print("🔌 Flexiroam (Safe) 插件已加载")
