@@ -56,7 +56,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if is_auth:
         text += "请选择要运行的功能模块："
         
-        yanci_btn_text = "🌏 Yanci 下单助手" if yanci_status else "🌏 Yanci (维护中)"
+        yanci_btn_text = "🌏 Yanci 抢单助手" if yanci_status else "🌏 Yanci (维护中)"
         flexi_btn_text = "🌐 Flexiroam 助手" if flexi_status else "🌐 Flexiroam (维护中)"
         
         keyboard.append([InlineKeyboardButton(yanci_btn_text, callback_data="plugin_yanci_entry")])
@@ -287,6 +287,15 @@ def main():
     # 3. 加载插件
     yanci.register_handlers(application)
     flexiroam.register_handlers(application)
+
+    # === 新增：启动时打印代理状态 ===
+    use_proxy = user_manager.get_config("use_proxy", True)
+    proxies = user_manager.get_proxies()
+    
+    print("\n" + "="*30)
+    logger.info(f"代理系统状态: {'🟢 开启' if use_proxy else '🔴 关闭'}")
+    logger.info(f"当前代理数量: {len(proxies)}")
+    print("="*30 + "\n")
     
     print("✅ 机器人已启动 (Yanci + Flexiroam + ProxyManager)...")
     application.run_polling()
