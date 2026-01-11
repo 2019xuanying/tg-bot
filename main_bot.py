@@ -48,7 +48,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if is_auth:
         text += "请选择要运行的功能模块："
         # === 已授权用户可见的功能 ===
-        keyboard.append([InlineKeyboardButton("🌏 Yanci 抢单助手", callback_data="plugin_yanci_entry")])
+        keyboard.append([InlineKeyboardButton("🌏 Yanci 下单助手", callback_data="plugin_yanci_entry")])
         # keyboard.append([InlineKeyboardButton("📱 其他项目", callback_data="plugin_other_entry")])
     else:
         text += "您目前没有使用权限，请点击下方按钮申请。"
@@ -199,3 +199,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
