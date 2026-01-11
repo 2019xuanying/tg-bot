@@ -353,8 +353,18 @@ async def flexiroam_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     context.user_data['flexi_state'] = FLEXI_STATE_NONE
     
+    # 鉴权
     if not user_manager.is_authorized(user.id):
         await update.callback_query.answer("🚫 未授权", show_alert=True)
+        return
+
+    # === 新增：特定项目开关检查 ===
+    if not user_manager.get_plugin_status("flexiroam") and user.id != ADMIN_ID:
+        await update.callback_query.edit_message_text(
+            "🛑 **该项目目前维护中**\n\n请稍后再试，或联系管理员。",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 返回主菜单", callback_data="main_menu_root")]]),
+            parse_mode='Markdown'
+        )
         return
 
     welcome_text = (
