@@ -358,7 +358,7 @@ async def flexiroam_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     welcome_text = (
-        f"🌐 **Flexiroam 自动化助手 (安全版)**\n"
+        f"🌐 **Flexiroam 助手**\n"
         f"当前状态: {'✅ 运行中' if user_manager.get_config('bot_active', True) else '🔴 维护中'}\n\n"
         f"请选择操作："
     )
