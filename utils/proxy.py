@@ -29,14 +29,9 @@ class ProxyManager:
             return None
 
     @staticmethod
-    def get_configured_session(test_url="https://www.google.com", timeout=5):
+    def get_configured_session(test_url="https://www.google.com", timeout=10):
         """
         核心方法：获取一个配置好的 Session。
-        逻辑：
-        1. 检查开关，若关，返回直连 Session。
-        2. 若开，随机从库中取代理。
-        3. 验证连通性，失败则重试下一条 (最多5次)。
-        4. 5次全挂，降级为直连 Session。
         """
         session = requests.Session()
         
@@ -48,7 +43,7 @@ class ProxyManager:
         # 2. 检查全局开关
         use_proxy = user_manager.get_config("use_proxy", True)
         if not use_proxy:
-            logger.info("代理开关已关闭，使用直连模式。")
+            # logger.info("代理开关已关闭，使用直连模式。") 
             return session
 
         # 3. 获取代理列表
@@ -59,7 +54,6 @@ class ProxyManager:
 
         # 4. 尝试连接 (最多5次)
         max_retries = 5
-        # 随机打乱列表，避免每次都取前几个
         candidates = random.sample(raw_proxies, min(len(raw_proxies), max_retries * 2)) 
         
         tried_count = 0
@@ -75,11 +69,12 @@ class ProxyManager:
             proxies_dict = {'http': formatted_proxy, 'https': formatted_proxy}
             
             try:
-                # 轻量级连通性测试 (注意：这里用 verify=False 避免 SSL 握手太慢，仅测连通)
-                # 使用 session 避免频繁握手
-                logger.info(f"正在尝试代理 ({tried_count+1}/{max_retries}): {proxy_str} ...")
+                # logger.info(f"正在尝试代理 ({tried_count+1}/{max_retries}): {proxy_str} ...")
                 test_sess = requests.Session()
                 test_sess.proxies = proxies_dict
+                
+                # 增加 verify=False 避免部分代理 SSL 握手问题导致失败，仅测试连通性
+                # 注意：这可能会有安全警告，但在测试代理连通性时是可以接受的
                 resp = test_sess.get(test_url, timeout=timeout)
                 
                 if resp.status_code == 200:
@@ -87,7 +82,12 @@ class ProxyManager:
                     session.proxies = proxies_dict
                     return session
             except Exception as e:
-                logger.debug(f"代理失败: {e}")
+                # === 修改处：打印详细错误信息以便排查 ===
+                # 常见错误：
+                # 1. ProxyError: 代理无法连接 (IP死的/端口不对)
+                # 2. ConnectTimeout: 超时
+                # 3. SSLError: 代理不支持 HTTPS 握手
+                logger.error(f"⚠️ 代理 {proxy_str} 失败: {type(e).__name__} - {str(e)}")
             
             tried_count += 1
 
