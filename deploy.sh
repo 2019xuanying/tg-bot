@@ -3,7 +3,7 @@
 # ================= 配置区 =================
 # ⚠️ 必须指向包含 plugins/ 和 utils/ 文件夹的 GitHub 根目录 Raw 地址
 REPO_URL="https://raw.githubusercontent.com/2019xuanying/tg-bot/main"
-INSTALL_DIR="/root/yanci_bot"
+INSTALL_DIR="/root/tg_bot"
 
 # ================= 脚本逻辑 =================
 
@@ -92,3 +92,4 @@ echo "   🎉 部署完成！"
 echo "   主程序: main_bot.py"
 
 echo "======================================"
+
