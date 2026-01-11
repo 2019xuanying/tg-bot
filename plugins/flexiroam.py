@@ -368,12 +368,12 @@ async def flexiroam_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     welcome_text = (
-        f"🌐 **Flexiroam 自动化助手 (安全版)**\n"
+        f"🌐 **Flexiroam 助手**\n"
         f"当前状态: {'✅ 运行中' if user_manager.get_config('bot_active', True) else '🔴 维护中'}\n\n"
         f"请选择操作："
     )
     keyboard = [
-        [InlineKeyboardButton("🚀 开始新任务 (注册)", callback_data="flexi_start_task")],
+        [InlineKeyboardButton("🚀 开始注册", callback_data="flexi_start_task")],
         [InlineKeyboardButton("🔑 登录账号", callback_data="flexi_login_task")],
         [InlineKeyboardButton("📊 监控管理", callback_data="flexi_monitor_menu")],
         [InlineKeyboardButton("🔙 返回主菜单", callback_data="main_menu_root")]
