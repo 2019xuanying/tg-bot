@@ -6,7 +6,7 @@ import time
 import asyncio
 import traceback
 from urllib.parse import unquote, urlparse, parse_qs
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, CallbackQueryHandler, MessageHandler, filters
 
 # 导入通用工具
@@ -16,11 +16,10 @@ from utils.mail import MailTm
 logger = logging.getLogger(__name__)
 
 # ================= 状态常量定义 =================
-# 使用特定前缀避免与其他插件冲突
 YANCI_STATE_NONE = 0
 YANCI_STATE_WAIT_MANUAL_EMAIL = 4
 
-# ================= 业务逻辑工具类 (完整迁移) =================
+# ================= 业务逻辑工具类 (完整版) =================
 
 FIXED_PASSWORD = "Pass1234"
 PRODUCT_ID = '974'
@@ -525,9 +524,17 @@ async def yanci_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     context.user_data['yanci_state'] = YANCI_STATE_NONE
     
+    # 🛡️ 插件内部防线：如果未授权，直接弹回主菜单
+    if not user_manager.is_authorized(user.id):
+        await update.callback_query.answer("🚫 权限校验失败，请先申请。", show_alert=True)
+        # 也可以选择显示一个“请去申请”的界面
+        keyboard = [[InlineKeyboardButton("🔙 返回主菜单申请", callback_data="main_menu_root")]]
+        await update.callback_query.edit_message_text("🚫 **无权访问**\n\n请返回主菜单申请全局使用权限。", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+        return
+
     welcome_text = (
         f"🌏 **Yanci 自动抢单助手**\n"
-        f"当前服务状态: {'✅ 运行中' if user_manager.get_config('bot_active', True) else '🔴 维护中'}\n\n"
+        f"服务状态: {'✅ 运行中' if user_manager.get_config('bot_active', True) else '🔴 维护中'}\n\n"
         f"请选择操作："
     )
     
@@ -549,38 +556,34 @@ async def yanci_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     data = query.data
 
+    # 再次检查权限 (防止直接调接口)
+    if not user_manager.is_authorized(user.id):
+        await query.edit_message_text("🚫 无权访问。", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 返回主菜单", callback_data="main_menu_root")]]))
+        return
+
     if data == "yanci_info":
         stats = user_manager.get_all_stats().get(str(user.id), {})
         count = stats.get('count', 0)
-        auth_status = "✅ 已授权" if user_manager.is_authorized(user.id) else "🚫 未授权"
-        
         await query.edit_message_text(
-            f"📊 **Yanci 任务统计**\n\n用户: {user.first_name}\n状态: {auth_status}\n累计执行: {count} 次",
+            f"📊 **Yanci 任务统计**\n\n用户: {user.first_name}\n累计执行: {count} 次",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 返回", callback_data="plugin_yanci_entry")]]),
             parse_mode='Markdown'
         )
         return
 
     if data == "yanci_auto_task":
-        # 1. 检查机器人是否开启
         if not user_manager.get_config("bot_active", True) and user.id != ADMIN_ID:
              await query.edit_message_text(
-                 "⚠️ **机器人维护中**\n\n管理员暂时关闭了服务。", 
-                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 返回", callback_data="plugin_yanci_entry")]]),
-                 parse_mode='Markdown'
+                 "⚠️ **机器人维护中**", 
+                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 返回", callback_data="plugin_yanci_entry")]])
              )
              return
-
-        # 2. 检查权限
-        if not user_manager.is_authorized(user.id):
-            await query.edit_message_text("🚫 无权访问。", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 返回", callback_data="plugin_yanci_entry")]]))
-            return
         
-        # 3. 启动
+        # 启动任务
         asyncio.create_task(run_auto_task(query, context, user))
         return
 
-    # 手动验证完成回调
+    # 手动验证回调
     if data == "yanci_manual_verify_done":
         session_data = context.user_data.get('yanci_pending_manual_session')
         if not session_data:
@@ -622,19 +625,10 @@ async def yanci_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         
         asyncio.create_task(core_flow_register(status_msg, context, user, email=text, mail_token=None))
 
-
-# ================= 注册函数 (核心) =================
+# ================= 注册函数 =================
 
 def register_handlers(application):
-    """主程序调用此函数加载插件"""
-    # 注册回调处理器：匹配所有 yanci_ 开头的回调
     application.add_handler(CallbackQueryHandler(yanci_callback, pattern="^yanci_.*"))
-    
-    # 注册插件入口：匹配 plugin_yanci_entry
     application.add_handler(CallbackQueryHandler(yanci_menu, pattern="^plugin_yanci_entry$"))
-    
-    # 注册文本处理器 (用于手动输入邮箱)
-    # 注意：这里会捕获所有文本，所以最好配合状态机使用
     application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), yanci_text_handler))
-    
-    print("🔌 Yanci 插件已加载 (包含完整业务逻辑)")
+    print("🔌 Yanci 插件已加载")
