@@ -17,6 +17,8 @@ logger = logging.getLogger(__name__)
 FLEXI_STATE_NONE = 0
 FLEXI_STATE_WAIT_MANUAL_EMAIL = 3
 FLEXI_STATE_WAIT_MANUAL_PASSWORD = 4
+FLEXI_STATE_WAIT_LOGIN_EMAIL = 5      # 新增：等待登录邮箱
+FLEXI_STATE_WAIT_LOGIN_PASSWORD = 6   # 新增：等待登录密码
 
 # ================= 代理配置 (内置) =================
 PROXY_POOL = [
@@ -68,7 +70,22 @@ class FlexiroamLogic:
         return session
 
     @staticmethod
+    def get_random_identity():
+        """生成随机身份信息以规避风控"""
+        first_names = ["James", "John", "Robert", "Michael", "William", "David", "Richard", "Joseph", "Thomas", "Charles", "Mary", "Patricia", "Jennifer", "Linda", "Elizabeth", "Barbara", "Susan", "Jessica", "Sarah", "Karen"]
+        last_names = ["Smith", "Johnson", "Williams", "Jones", "Brown", "Davis", "Miller", "Wilson", "Moore", "Taylor", "Anderson", "Thomas", "Jackson", "White", "Harris"]
+        # 常见国家代码：美国、英国、德国、法国、意大利、加拿大、澳大利亚、新加坡、马来西亚、日本
+        countries = ["US", "GB", "DE", "FR", "IT", "CA", "AU", "SG", "MY", "JP"]
+        
+        return {
+            "first_name": random.choice(first_names),
+            "last_name": random.choice(last_names),
+            "country": random.choice(countries)
+        }
+
+    @staticmethod
     def register(session, email, password):
+        """提交注册请求"""
         url = "https://prod-enduserservices.flexiroam.com/api/registration/request/create"
         headers = {
             "authorization": "Bearer " + JWT_APP_TOKEN,
@@ -77,9 +94,17 @@ class FlexiroamLogic:
             "origin": "https://www.flexiroam.com",
             "referer": "https://www.flexiroam.com/en-us/signup"
         }
+        
+        # 使用随机身份
+        identity = FlexiroamLogic.get_random_identity()
+        
         payload = {
-            "email": email, "password": password, "first_name": "Traveler", "last_name": "Bot",
-            "home_country_code": "CN", "language_preference": "en-us"
+            "email": email,
+            "password": password,
+            "first_name": identity["first_name"],
+            "last_name": identity["last_name"],
+            "home_country_code": identity["country"],
+            "language_preference": "en-us"
         }
         try:
             res = session.post(url, headers=headers, json=payload, timeout=20)
@@ -286,7 +311,8 @@ async def flexiroam_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"请选择操作："
     )
     keyboard = [
-        [InlineKeyboardButton("🚀 开始新任务", callback_data="flexi_start_task")],
+        [InlineKeyboardButton("🚀 开始新任务 (注册)", callback_data="flexi_start_task")],
+        [InlineKeyboardButton("🔑 登录账号", callback_data="flexi_login_task")],
         [InlineKeyboardButton("📊 监控管理", callback_data="flexi_monitor_menu")],
         [InlineKeyboardButton("🔙 返回主菜单", callback_data="main_menu_root")]
     ]
@@ -331,7 +357,17 @@ async def flexiroam_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
              return
         
         context.user_data['flexi_state'] = FLEXI_STATE_WAIT_MANUAL_EMAIL
-        await query.edit_message_text("📧 **请输入 Flexiroam 邮箱地址：**\n(请直接回复消息)", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 取消", callback_data="plugin_flexi_entry")]]), parse_mode='Markdown')
+        await query.edit_message_text("📧 **请输入新的 Flexiroam 邮箱地址：**\n(请直接回复消息)", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 取消", callback_data="plugin_flexi_entry")]]), parse_mode='Markdown')
+        return
+
+    # === 新增：登录入口 ===
+    if data == "flexi_login_task":
+        if not user_manager.get_config("bot_active", True) and user.id != ADMIN_ID:
+             await query.edit_message_text("⚠️ 维护中。", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 返回", callback_data="plugin_flexi_entry")]]))
+             return
+        
+        context.user_data['flexi_state'] = FLEXI_STATE_WAIT_LOGIN_EMAIL
+        await query.edit_message_text("🔑 **请输入已注册的邮箱地址：**\n(请直接回复消息)", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 取消", callback_data="plugin_flexi_entry")]]), parse_mode='Markdown')
         return
 
     if data == "flexi_manual_verify_done":
@@ -350,17 +386,20 @@ async def run_flexiroam_task(message, context, user, email, password):
         status_msg = await message.reply_text("⏳ 初始化环境...")
         session = await asyncio.get_running_loop().run_in_executor(None, FlexiroamLogic.get_session)
         
-        await status_msg.edit_text(f"🚀 **提交注册**\n📧 `{email}`", parse_mode='Markdown')
+        # 1. 提交注册
+        await status_msg.edit_text(f"🚀 **提交注册**\n📧 `{email}`\n(使用随机身份以规避风控)", parse_mode='Markdown')
         reg_ok, reg_msg = await asyncio.get_running_loop().run_in_executor(None, FlexiroamLogic.register, session, email, password)
         if not reg_ok:
             await status_msg.edit_text(f"❌ 注册失败: {reg_msg}")
             return
 
+        # 2. 暂停，等待人工验证
         await status_msg.edit_text(
             f"📩 **注册成功！请去邮箱点击链接验证**\n验证完成后点击下方按钮。",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ 我已完成验证", callback_data="flexi_manual_verify_done")]]),
             parse_mode='Markdown'
         )
+        # 保存状态
         context.user_data['flexi_pending_task'] = {'session': session, 'email': email, 'password': password}
 
     except Exception as e:
@@ -368,6 +407,7 @@ async def run_flexiroam_task(message, context, user, email, password):
         await status_msg.edit_text(f"💥 异常: {e}")
 
 async def finish_flexiroam_task(message, context, user, session, email, password):
+    """注册后的收尾流程"""
     try:
         app_token = None
         for i in range(3):
@@ -403,18 +443,55 @@ async def finish_flexiroam_task(message, context, user, session, email, password
         logger.error(traceback.format_exc())
         await message.edit_text(f"💥 异常: {e}")
 
+async def run_flexiroam_login_task(message, context, user, email, password):
+    """直接登录流程"""
+    try:
+        user_manager.increment_usage(user.id, user.first_name)
+        status_msg = await message.reply_text("⏳ 正在登录...")
+        session = await asyncio.get_running_loop().run_in_executor(None, FlexiroamLogic.get_session)
+        
+        l_ok, l_data = await asyncio.get_running_loop().run_in_executor(None, FlexiroamLogic.login, session, email, password)
+        
+        if not l_ok:
+            await status_msg.edit_text(f"❌ 登录失败: {l_data}\n请检查账号密码是否正确。")
+            return
+            
+        app_token = l_data['token']
+        await status_msg.edit_text("✅ 登录成功！\n🎁 正在检查/兑换新手福利...")
+        
+        r_ok, r_msg = await asyncio.get_running_loop().run_in_executor(None, FlexiroamLogic.redeem_code, session, app_token, email)
+        status_text = f"✅ 兑换成功" if r_ok else f"⚠️ 兑换: {r_msg}"
+        
+        await status_msg.edit_text(f"{status_text}\n⏳ 正在激活流量包...")
+        
+        s_ok, s_msg = await asyncio.get_running_loop().run_in_executor(None, FlexiroamLogic.start_plan, session, app_token)
+        
+        context.user_data['flexi_monitor_data'] = {'session': session, 'token': app_token, 'email': email}
+        act_text = "✅ 激活成功" if s_ok else f"⚠️ 激活: {s_msg}"
+        
+        await status_msg.edit_text(
+            f"🎉 **操作完成！**\n{status_text}\n{act_text}\n\n📡 **启动后台监控？**\n(当流量<30%自动激活新套餐)", 
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ 启动监控", callback_data="flexi_start_monitor_confirm")]]), 
+            parse_mode='Markdown'
+        )
+
+    except Exception as e:
+        logger.error(traceback.format_exc())
+        await status_msg.edit_text(f"💥 异常: {e}")
+
 async def flexiroam_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     state = context.user_data.get('flexi_state', FLEXI_STATE_NONE)
     text = update.message.text.strip()
     user = update.effective_user
 
+    # --- 注册流程 ---
     if state == FLEXI_STATE_WAIT_MANUAL_EMAIL:
         if "@" not in text or "." not in text:
             await update.message.reply_text("❌ 邮箱无效，请重新输入。")
             return
         context.user_data['flexi_temp_email'] = text
         context.user_data['flexi_state'] = FLEXI_STATE_WAIT_MANUAL_PASSWORD
-        await update.message.reply_text(f"✅ 邮箱: `{text}`\n🔑 **请输入密码：**", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 取消", callback_data="plugin_flexi_entry")]]), parse_mode='Markdown')
+        await update.message.reply_text(f"✅ 注册邮箱: `{text}`\n🔑 **请设置密码：**", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 取消", callback_data="plugin_flexi_entry")]]), parse_mode='Markdown')
         return
 
     if state == FLEXI_STATE_WAIT_MANUAL_PASSWORD:
@@ -425,8 +502,30 @@ async def flexiroam_text_handler(update: Update, context: ContextTypes.DEFAULT_T
             await update.message.reply_text("⚠️ 流程异常，请重试。")
             return
         context.user_data['flexi_state'] = FLEXI_STATE_NONE
-        await update.message.reply_text(f"✅ 密码已接收\n🚀 启动 Flexiroam 任务...")
+        await update.message.reply_text(f"✅ 密码已设置\n🚀 正在注册 Flexiroam...")
         asyncio.create_task(run_flexiroam_task(update.message, context, user, email, password))
+        return
+
+    # --- 登录流程 ---
+    if state == FLEXI_STATE_WAIT_LOGIN_EMAIL:
+        if "@" not in text or "." not in text:
+            await update.message.reply_text("❌ 邮箱无效，请重新输入。")
+            return
+        context.user_data['flexi_login_email'] = text
+        context.user_data['flexi_state'] = FLEXI_STATE_WAIT_LOGIN_PASSWORD
+        await update.message.reply_text(f"✅ 登录邮箱: `{text}`\n🔑 **请输入密码：**", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 取消", callback_data="plugin_flexi_entry")]]), parse_mode='Markdown')
+        return
+
+    if state == FLEXI_STATE_WAIT_LOGIN_PASSWORD:
+        password = text
+        email = context.user_data.get('flexi_login_email')
+        if not email:
+            context.user_data['flexi_state'] = FLEXI_STATE_NONE
+            await update.message.reply_text("⚠️ 流程异常，请重试。")
+            return
+        context.user_data['flexi_state'] = FLEXI_STATE_NONE
+        await update.message.reply_text(f"✅ 密码已接收\n🚀 正在登录...")
+        asyncio.create_task(run_flexiroam_login_task(update.message, context, user, email, password))
         return
 
 # ================= 注册函数 =================
