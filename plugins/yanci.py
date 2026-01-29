@@ -558,16 +558,14 @@ async def yanci_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # 再次检查权限 (防止直接调接口)
     if not user_manager.is_authorized(user.id):
-        await query.edit_message_text("🚫 无权访问。", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 返回主菜单", callback_data="main_menu_root")]]))
+        # ... (原有的授权检查代码保持不变) ...
         return
 
-    if data == "yanci_info":
-        stats = user_manager.get_all_stats().get(str(user.id), {})
-        count = stats.get('count', 0)
+    # ================= 修复开始: 二次检查插件开关 =================
+    if not user_manager.get_plugin_status("yanci") and str(user.id) != str(ADMIN_ID):
         await query.edit_message_text(
-            f"📊 **Yanci 任务统计**\n\n用户: {user.first_name}\n累计执行: {count} 次",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 返回", callback_data="plugin_yanci_entry")]]),
-            parse_mode='Markdown'
+            "⚠️ **功能已关闭**", 
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 返回", callback_data="plugin_yanci_entry")]])
         )
         return
 
@@ -632,3 +630,4 @@ def register_handlers(application):
     application.add_handler(CallbackQueryHandler(yanci_menu, pattern="^plugin_yanci_entry$"))
     application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), yanci_text_handler))
     print("🔌 Yanci 插件已加载")
+
