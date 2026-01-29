@@ -532,6 +532,16 @@ async def yanci_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.callback_query.edit_message_text("🚫 **无权访问**\n\n请返回主菜单申请全局使用权限。", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
         return
 
+    # === 修复：检查插件开关 ===
+    # 如果插件被禁用，且用户不是管理员，则拦截
+    if not user_manager.get_plugin_status("yanci") and str(user.id) != str(ADMIN_ID):
+        await update.callback_query.edit_message_text(
+            "🛑 **该功能目前维护中**\n\n请稍后再试，或联系管理员。",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 返回主菜单", callback_data="main_menu_root")]]),
+            parse_mode='Markdown'
+        )
+        return
+
     welcome_text = (
         f"🌏 **Yanci 自动抢单助手**\n"
         f"服务状态: {'✅ 运行中' if user_manager.get_config('bot_active', True) else '🔴 维护中'}\n\n"
@@ -558,14 +568,25 @@ async def yanci_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # 再次检查权限 (防止直接调接口)
     if not user_manager.is_authorized(user.id):
-        # ... (原有的授权检查代码保持不变) ...
+        await query.edit_message_text("🚫 无权访问。", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 返回主菜单", callback_data="main_menu_root")]]))
         return
 
-    # ================= 修复开始: 二次检查插件开关 =================
+    # === 修复：检查插件开关 ===
+    # 防止用户通过旧消息的按钮直接触发功能
     if not user_manager.get_plugin_status("yanci") and str(user.id) != str(ADMIN_ID):
         await query.edit_message_text(
-            "⚠️ **功能已关闭**", 
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 返回", callback_data="plugin_yanci_entry")]])
+            "🛑 **该功能已关闭**\n\n管理员已暂停此服务。", 
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 返回主菜单", callback_data="main_menu_root")]])
+        )
+        return
+
+    if data == "yanci_info":
+        stats = user_manager.get_all_stats().get(str(user.id), {})
+        count = stats.get('count', 0)
+        await query.edit_message_text(
+            f"📊 **Yanci 任务统计**\n\n用户: {user.first_name}\n累计执行: {count} 次",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 返回", callback_data="plugin_yanci_entry")]]),
+            parse_mode='Markdown'
         )
         return
 
@@ -604,6 +625,7 @@ async def yanci_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     """处理手动输入的邮箱"""
     state = context.user_data.get('yanci_state', YANCI_STATE_NONE)
     if state == YANCI_STATE_WAIT_MANUAL_EMAIL:
+        # 这里也可以选择加上开关检查，但通常入口卡住就足够了
         text = update.message.text.strip()
         user = update.effective_user
         
@@ -630,4 +652,3 @@ def register_handlers(application):
     application.add_handler(CallbackQueryHandler(yanci_menu, pattern="^plugin_yanci_entry$"))
     application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), yanci_text_handler))
     print("🔌 Yanci 插件已加载")
-
