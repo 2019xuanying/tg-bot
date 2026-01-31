@@ -60,7 +60,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         yanci_btn_text = "🌏 Yanci 抢单助手" if yanci_status else "🌏 Yanci (维护中)"
         flexi_btn_text = "🌐 Flexiroam 助手" if flexi_status else "🌐 Flexiroam (维护中)"
-        jetfi_btn_text = "🚙 JetFi 卿子助手" if jetfi_status else "🚙 JetFi (维护中)" # <--- 新增按钮文本
+        jetfi_btn_text = "🚙 JetFi 助手" if jetfi_status else "🚙 JetFi (维护中)" # <--- 新增按钮文本
         
         keyboard.append([InlineKeyboardButton(yanci_btn_text, callback_data="plugin_yanci_entry")])
         keyboard.append([InlineKeyboardButton(flexi_btn_text, callback_data="plugin_flexi_entry")])
@@ -317,3 +317,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
