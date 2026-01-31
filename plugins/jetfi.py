@@ -157,7 +157,7 @@ async def jetfi_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     text = (
-        f"🚙 **JetFi (卿子助手) 面板**\n"
+        f"🚙 **JetFi助手**\n"
         f"状态: {'✅ 运行中' if user_manager.get_config('bot_active', True) else '🔴 维护中'}\n\n"
         f"当前支持套餐: 中国大陆 1天 (自动发车)"
     )
