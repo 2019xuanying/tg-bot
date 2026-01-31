@@ -12,6 +12,7 @@ from utils.database import user_manager, ADMIN_ID
 # 导入插件
 from plugins import yanci
 from plugins import flexiroam
+from plugins import jetfi  # <--- 新增导入
 
 # 配置日志
 logging.basicConfig(
@@ -43,6 +44,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 动态检查插件状态
     yanci_status = user_manager.get_plugin_status("yanci")
     flexi_status = user_manager.get_plugin_status("flexiroam")
+    jetfi_status = user_manager.get_plugin_status("jetfi") # <--- 新增状态检查
 
     text = (
         f"🤖 **聚合控制中心**\n\n"
@@ -58,9 +60,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         yanci_btn_text = "🌏 Yanci 抢单助手" if yanci_status else "🌏 Yanci (维护中)"
         flexi_btn_text = "🌐 Flexiroam 助手" if flexi_status else "🌐 Flexiroam (维护中)"
+        jetfi_btn_text = "🚙 JetFi 卿子助手" if jetfi_status else "🚙 JetFi (维护中)" # <--- 新增按钮文本
         
         keyboard.append([InlineKeyboardButton(yanci_btn_text, callback_data="plugin_yanci_entry")])
         keyboard.append([InlineKeyboardButton(flexi_btn_text, callback_data="plugin_flexi_entry")])
+        keyboard.append([InlineKeyboardButton(jetfi_btn_text, callback_data="plugin_jetfi_entry")]) # <--- 新增按钮
     else:
         text += "您目前没有使用权限，请点击下方按钮申请。"
         keyboard.append([InlineKeyboardButton("📝 申请使用权限", callback_data="global_request_auth")])
@@ -140,20 +144,24 @@ async def main_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
         return
 
-    # 2. 项目开关控制 (保持不变)
+    # 2. 项目开关控制
     if data == "admin_ctrl_plugins":
         if str(user.id) != str(ADMIN_ID): return
         y_status = user_manager.get_plugin_status("yanci")
         f_status = user_manager.get_plugin_status("flexiroam")
+        j_status = user_manager.get_plugin_status("jetfi") # <--- 新增状态
+        
         text = "🔧 **项目运行状态控制**\n点击按钮切换 开启/关闭 状态。"
         keyboard = [
             [InlineKeyboardButton(f"Yanci: {'🟢 开启' if y_status else '🔴 关闭'}", callback_data="admin_toggle_yanci")],
             [InlineKeyboardButton(f"Flexiroam: {'🟢 开启' if f_status else '🔴 关闭'}", callback_data="admin_toggle_flexi")],
+            [InlineKeyboardButton(f"JetFi: {'🟢 开启' if j_status else '🔴 关闭'}", callback_data="admin_toggle_jetfi")], # <--- 新增控制
             [InlineKeyboardButton("🔙 返回上级", callback_data="admin_menu_main")]
         ]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
         return
 
+    # === 插件开关逻辑 ===
     if data == "admin_toggle_yanci":
         user_manager.toggle_plugin("yanci")
         update.callback_query.data = "admin_ctrl_plugins"
@@ -166,7 +174,13 @@ async def main_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await main_callback(update, context)
         return
 
-    # 3. 代理池管理 (新功能)
+    if data == "admin_toggle_jetfi": # <--- 新增切换逻辑
+        user_manager.toggle_plugin("jetfi")
+        update.callback_query.data = "admin_ctrl_plugins"
+        await main_callback(update, context)
+        return
+
+    # 3. 代理池管理 (保持不变)
     if data == "admin_ctrl_proxies":
         if str(user.id) != str(ADMIN_ID): return
         
@@ -287,8 +301,9 @@ def main():
     # 3. 加载插件
     yanci.register_handlers(application)
     flexiroam.register_handlers(application)
+    jetfi.register_handlers(application) # <--- 注册新插件
 
-    # === 新增：启动时打印代理状态 ===
+    # === 启动状态打印 ===
     use_proxy = user_manager.get_config("use_proxy", True)
     proxies = user_manager.get_proxies()
     
@@ -297,7 +312,7 @@ def main():
     logger.info(f"当前代理数量: {len(proxies)}")
     print("="*30 + "\n")
     
-    print("✅ 机器人已启动 (Yanci + Flexiroam + ProxyManager)...")
+    print("✅ 机器人已启动 (Yanci + Flexiroam + JetFi)...")
     application.run_polling()
 
 if __name__ == '__main__':
