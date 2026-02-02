@@ -23,7 +23,7 @@ TRAVEL_STATE_WAIT_INPUT = 1
 # ================= 核心逻辑 =================
 
 class TravelLogic:
-    # URL 模板，日期部分留坑
+    # URL 模板
     URL_TEMPLATE = "https://travelgoogoo-public-qr-prd.s3.ap-southeast-1.amazonaws.com/{year}/{month}/{day}/{number}.png"
 
     @staticmethod
@@ -39,7 +39,6 @@ class TravelLogic:
     def generate_targets(base_number: str):
         """
         生成扫描目标列表。
-        优化逻辑：同时覆盖 19位 (标准) 和 20位 (扩容) 两种情况。
         Base(15) + Suffix(3) + Luhn(1) = 19位
         Base(15) + Suffix(4) + Luhn(1) = 20位
         """
@@ -52,7 +51,6 @@ class TravelLogic:
             targets.append(f"{body}{check}")
             
         # 模式 2: 4位后缀 (0000-1000) -> 总长 20
-        # 考虑到 20 位较少见，仅扫描前 1000 个可能的 20 位号码，避免请求过多
         for i in range(1000): 
             body = f"{base_number}{i:04d}"
             check = TravelLogic.luhn_calc(body)
@@ -70,8 +68,7 @@ class TravelLogic:
             year, month, day = date_str[:4], date_str[4:6], date_str[6:8]
             url = TravelLogic.URL_TEMPLATE.format(year=year, month=month, day=day, number=number)
             
-            # 1. 优化：HEAD 请求预检 (节省带宽)
-            # 只有当 HEAD 返回 200 时，才进行 GET
+            # 1. HEAD 请求预检
             try:
                 head_resp = session.head(url, timeout=3)
                 if head_resp.status_code != 200:
@@ -86,11 +83,13 @@ class TravelLogic:
                     img = Image.open(BytesIO(resp.content))
                     decoded = decode(img)
                     if decoded:
-                        content = [d.data.decode('utf-8') for d in decoded]
+                        # 提取解码内容，通常只有一个
+                        content_list = [d.data.decode('utf-8') for d in decoded]
+                        content_str = "\n".join(content_list) # 拼接，以防有多个
                         return {
                             'number': number, 
                             'url': url, 
-                            'content': content, 
+                            'content': content_str,  # 这里存字符串
                             'bytes': resp.content
                         }
                 except:
@@ -104,14 +103,12 @@ class TravelLogic:
 async def run_scan_task(update: Update, context: ContextTypes.DEFAULT_TYPE, raw_input: str):
     user = update.effective_user
     
-    # 解析输入：支持 "Base" 或 "Base 日期"
     parts = raw_input.split()
     base_number = parts[0]
     
     if len(parts) > 1:
         date_str = parts[1]
     else:
-        # 默认使用今天
         date_str = datetime.now().strftime("%Y%m%d")
 
     # 简单校验
@@ -126,26 +123,20 @@ async def run_scan_task(update: Update, context: ContextTypes.DEFAULT_TYPE, raw_
         f"🚀 **任务已启动**\n"
         f"🎯 基数: `{base_number}`\n"
         f"📅 日期: `{date_str}`\n"
-        f"🔢 范围: 19位(000-999) + 20位(0000-0999)\n"
-        f"⏳ 初始化代理池...",
+        f"⏳ 正在初始化扫描...",
         parse_mode='Markdown'
     )
 
-    # 生成目标
     targets = TravelLogic.generate_targets(base_number)
     total = len(targets)
     
-    # 异步执行
     session = await asyncio.get_running_loop().run_in_executor(None, get_safe_session)
     
-    found_items = []
     scanned = 0
     
-    # 定义线程池任务
     def batch_scan():
         nonlocal scanned
         results = []
-        # 增加并发数到 30，因为我们要扫 HEAD 请求，速度很快
         with ThreadPoolExecutor(max_workers=30) as executor:
             futures = {executor.submit(TravelLogic.check_and_decode, num, date_str, session): num for num in targets}
             
@@ -161,7 +152,6 @@ async def run_scan_task(update: Update, context: ContextTypes.DEFAULT_TYPE, raw_
         
         final_results = await asyncio.get_running_loop().run_in_executor(None, batch_scan)
         
-        # 汇总报告
         if not final_results:
             await status_msg.edit_text(
                 f"💨 **扫描结束**\n"
@@ -173,10 +163,15 @@ async def run_scan_task(update: Update, context: ContextTypes.DEFAULT_TYPE, raw_
             await status_msg.edit_text(f"🎉 **扫描完成！发现 {len(final_results)} 个有效码**")
             
             for item in final_results:
+                # === 核心修改处：优化输出信息 ===
+                content_text = item.get('content', '无法解码')
+                
                 caption = (
                     f"🎫 **eSIM QR Code**\n"
-                    f"ID: `{item['number']}`\n"
-                    f"🔗 [原始链接]({item['url']})"
+                    f"ID: `{item['number']}`\n\n"
+                    f"📝 **安装代码 (LPA)**:\n"
+                    f"`{content_text}`\n\n" # 将解码内容放入代码块，方便复制
+                    f"🔗 [原始图片链接]({item['url']})"
                 )
                 try:
                     await context.bot.send_photo(
@@ -187,6 +182,12 @@ async def run_scan_task(update: Update, context: ContextTypes.DEFAULT_TYPE, raw_
                     )
                 except Exception as e:
                     logger.error(f"发图失败: {e}")
+                    # 如果发图失败（比如图片太大或格式问题），尝试只发文字
+                    await context.bot.send_message(
+                        chat_id=user.id,
+                        text=f"⚠️ 图片发送失败，但已解码：\n\n{caption}",
+                        parse_mode='Markdown'
+                    )
                     
     except Exception as e:
         logger.error(traceback.format_exc())
@@ -199,11 +200,11 @@ async def travel_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     text = (
-        "🏝 **TravelGooGoo 扫描器**\n\n"
-        "✅ **逻辑优化**:\n"
-        "1. 自动计算 19位/20位 校验码\n"
+        "🏝 **TravelGooGoo 扫描器 (Pro)**\n\n"
+        "✅ **功能特点**:\n"
+        "1. 自动计算校验码 (19/20位)\n"
         "2. 支持自定义日期 (默认今天)\n"
-        "3. HEAD 预检，极速扫描\n"
+        "3. **自动解析并显示 LPA 激活码**\n"
     )
     keyboard = [[InlineKeyboardButton("🚀 开始扫描", callback_data="travel_start")],
                 [InlineKeyboardButton("🔙 返回", callback_data="main_menu_root")]]
@@ -222,8 +223,7 @@ async def travel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(
             "📝 **请输入参数**\n\n"
             "格式: `BaseNumber [日期]`\n"
-            "示例 1: `896501251118099` (默认扫今天)\n"
-            "示例 2: `896501251118099 20260202` (指定日期)\n\n"
+            "示例: `896501251118099 20260202`\n\n"
             "请直接回复消息:",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 取消", callback_data="plugin_travel_entry")]]),
             parse_mode='Markdown'
