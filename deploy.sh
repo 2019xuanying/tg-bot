@@ -127,7 +127,7 @@ echo -e "${YELLOW}[5/6] 安装环境依赖...${PLAIN}"
 # 仅在第一次安装系统依赖，节省时间
 if ! command -v python3 &> /dev/null; then
     apt-get update -y >/dev/null 2>&1
-    apt-get install -y python3 python3-pip python3-venv python3-full >/dev/null 2>&1
+    apt-get install -y python3 python3-pip python3-venv python3-full libzbar0 >/dev/null 2>&1
 fi
 
 # 创建或修复虚拟环境
