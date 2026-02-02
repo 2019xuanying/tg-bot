@@ -66,6 +66,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard.append([InlineKeyboardButton(yanci_btn_text, callback_data="plugin_yanci_entry")])
         keyboard.append([InlineKeyboardButton(flexi_btn_text, callback_data="plugin_flexi_entry")])
         keyboard.append([InlineKeyboardButton(jetfi_btn_text, callback_data="plugin_jetfi_entry")]) # <--- 新增按钮
+        keyboard.append([InlineKeyboardButton("🏝 TravelGooGoo 扫码", callback_data="plugin_travel_entry")])
     else:
         text += "您目前没有使用权限，请点击下方按钮申请。"
         keyboard.append([InlineKeyboardButton("📝 申请使用权限", callback_data="global_request_auth")])
@@ -303,6 +304,7 @@ def main():
     yanci.register_handlers(application)
     flexiroam.register_handlers(application)
     jetfi.register_handlers(application) # <--- 注册新插件
+    travelgoogoo.register_handlers(application)
 
     # === 启动状态打印 ===
     use_proxy = user_manager.get_config("use_proxy", True)
@@ -318,5 +320,6 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
