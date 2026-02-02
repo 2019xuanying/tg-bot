@@ -199,8 +199,8 @@ async def travel_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     text = (
-        "🏝 **TravelGooGoo 扫描器 (Pro)**\n\n"
-        "✅ **逻辑优化版**:\n"
+        "🏝 **TravelGooGoo 扫描器**\n\n"
+        "✅ **逻辑优化**:\n"
         "1. 自动计算 19位/20位 校验码\n"
         "2. 支持自定义日期 (默认今天)\n"
         "3. HEAD 预检，极速扫描\n"
