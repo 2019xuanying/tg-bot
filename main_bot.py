@@ -13,6 +13,7 @@ from utils.database import user_manager, ADMIN_ID
 from plugins import yanci
 from plugins import flexiroam
 from plugins import jetfi  # <--- 新增导入
+from plugins import travelgoogoo  # <--- 新增
 
 # 配置日志
 logging.basicConfig(
@@ -317,4 +318,5 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
