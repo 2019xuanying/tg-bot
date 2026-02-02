@@ -1,4 +1,7 @@
 python-telegram-bot>=20.0
-requests
 python-dotenv
+requests
 PySocks
+schedule
+pyzbar
+Pillow
