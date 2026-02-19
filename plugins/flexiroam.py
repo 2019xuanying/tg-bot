@@ -11,7 +11,6 @@ from telegram.ext import ContextTypes, CallbackQueryHandler, MessageHandler, fil
 
 # 导入通用工具
 from utils.database import user_manager, ADMIN_ID
-# 导入新的代理管理器
 from utils.proxy import get_safe_session
 
 logger = logging.getLogger(__name__)
@@ -30,9 +29,9 @@ class FlexiroamLogic:
     def get_session():
         session = get_safe_session(test_url="https://www.flexiroam.com", timeout=10)
         session.headers.update({
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
-            "Accept-Language": "zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7",
-            "sec-ch-ua": '"Google Chrome";v="143", "Chromium";v="143", "Not A(Brand";v="24"',
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36",
+            "Accept-Language": "en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7",
+            "sec-ch-ua": '"Not(A:Brand";v="8", "Chromium";v="144", "Google Chrome";v="144"',
             "sec-ch-ua-mobile": "?0",
             "sec-ch-ua-platform": '"Windows"'
         })
@@ -86,7 +85,7 @@ class FlexiroamLogic:
     @staticmethod
     def get_plans(session):
         try:
-            res = session.get("https://www.flexiroam.com/en-us/my-plans", headers={"rsc": "1"}, timeout=20)
+            res = session.get("https://www.flexiroam.com/en-us/my-plans", headers={"rsc": "1", "referer": "https://www.flexiroam.com/en-us/profile"}, timeout=20)
             for line in res.text.splitlines():
                 if '{"plans":[' in line:
                     start = line.find('{"plans":[')
@@ -117,39 +116,76 @@ class FlexiroamLogic:
     @staticmethod
     def redeem_code(session, token, email, custom_bin):
         """
-        尝试领卡，传入自定义 BIN
+        [优化版] 尝试领卡：基于最新抓包特征，增加 OPTIONS 预检请求并对齐 Headers
         """
         url_check = "https://prod-enduserservices.flexiroam.com/api/user/redemption/check/eligibility"
         url_conf = "https://prod-enduserservices.flexiroam.com/api/user/redemption/confirm"
-        headers = {
-            "authorization": "Bearer " + token, 
-            "content-type": "application/json", "lang": "en-us",
-            "origin": "https://www.flexiroam.com", "referer": "https://www.flexiroam.com/en-us/home"
-        }
         
+        # 1. 严格对齐抓包中的 HTTP Headers
+        headers = {
+            "accept": "*/*",
+            "accept-language": "en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7",
+            "authorization": "Bearer " + token,
+            "content-type": "application/json",
+            "lang": "en-us",
+            "origin": "https://www.flexiroam.com",
+            "priority": "u=1, i",
+            "referer": "https://www.flexiroam.com/en-us/profile",
+            "sec-ch-ua": '"Not(A:Brand";v="8", "Chromium";v="144", "Google Chrome";v="144"',
+            "sec-ch-ua-mobile": "?0",
+            "sec-ch-ua-platform": '"Windows"',
+            "sec-fetch-dest": "empty",
+            "sec-fetch-mode": "cors",
+            "sec-fetch-site": "same-site",
+            "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36"
+        }
+
+        # 2. 模拟浏览器的 CORS OPTIONS 预检请求头
+        options_headers = headers.copy()
+        if "authorization" in options_headers: del options_headers["authorization"]
+        if "content-type" in options_headers: del options_headers["content-type"]
+        if "lang" in options_headers: del options_headers["lang"]
+        options_headers["access-control-request-headers"] = "authorization,content-type,lang"
+        options_headers["access-control-request-method"] = "POST"
+
         for i in range(3):
             card_num = FlexiroamLogic.generate_card_number(custom_bin)
             try:
-                payload = {"email": email, "lookup_value": card_num}
-                res = session.post(url_check, headers=headers, json=payload, timeout=5)
-                rj = res.json()
+                # === 步骤一：验证资格 (Check Eligibility) ===
+                # 模拟浏览器行为：先发 OPTIONS 预检
+                session.options(url_check, headers=options_headers, timeout=5)
+                
+                payload_check = {"email": email, "lookup_value": card_num}
+                res_check = session.post(url_check, headers=headers, json=payload_check, timeout=10)
+                rj_check = res_check.json()
 
-                if "processing" in str(rj).lower(): 
+                if "processing" in str(rj_check).lower(): 
                     return True, "Pending Order Exists" 
                 
-                if "Data Plan" in str(rj) and "data" in rj:
-                    redemption_id = rj["data"].get("redemption_id")
+                if "Data Plan" in str(rj_check) and "data" in rj_check:
+                    redemption_id = rj_check["data"].get("redemption_id")
                     if redemption_id:
-                        res_conf = session.post(url_conf, headers=headers, json={"redemption_id": redemption_id}, timeout=10)
+                        
+                        # === 步骤二：确认兑换 (Confirm) ===
+                        # 模拟浏览器行为：确认前同样进行 OPTIONS 预检
+                        session.options(url_conf, headers=options_headers, timeout=5)
+                        
+                        payload_conf = {"redemption_id": redemption_id}
+                        res_conf = session.post(url_conf, headers=headers, json=payload_conf, timeout=10)
                         rj_conf = res_conf.json()
+                        
                         if rj_conf.get("message") == "Redemption confirmed":
-                            return True, "Success"
-            except Exception:
-                pass
+                            return True, f"Success (Card: {card_num[:6]}****)"
+                        else:
+                            logger.warning(f"[Flexi] Redemption confirm rejected: {rj_conf}")
+                            
+            except Exception as e:
+                logger.error(f"[Flexi] Redeem Error: {e}")
             
-            time.sleep(1)
+            # 加入随机时延，降低自动化特征
+            time.sleep(random.uniform(1.5, 3.5))
         
-        return False, "Failed (Safe Retry)"
+        return False, "Failed (Safe Retry Limit)"
 
     @staticmethod
     def start_plan(session, token, plan_id):
@@ -286,13 +322,13 @@ async def flexiroam_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     welcome_text = (
-        f"🌐 **Flexiroam 自动化助手**\n"
+        f"🌐 **Flexiroam 自动化助手 (登录版)**\n"
         f"当前状态: {'✅ 运行中' if user_manager.get_config('bot_active', True) else '🔴 维护中'}\n\n"
         f"请选择操作："
     )
     keyboard = [
-        [InlineKeyboardButton("🔑 登录账号", callback_data="flexi_login_task")],
-        [InlineKeyboardButton("📊 监控管理", callback_data="flexi_monitor_menu")],
+        [InlineKeyboardButton("🔑 登录账号并自动领卡", callback_data="flexi_login_task")],
+        [InlineKeyboardButton("📊 后台监控管理", callback_data="flexi_monitor_menu")],
         [InlineKeyboardButton("🔙 返回主菜单", callback_data="main_menu_root")]
     ]
     
@@ -332,7 +368,7 @@ async def flexiroam_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     if data == "flexi_login_task":
         context.user_data['flexi_state'] = FLEXI_STATE_WAIT_BIN
-        await query.edit_message_text("💳 **请输入用于验证的自定义卡 BIN：**\n(例如：528911，请直接回复纯数字)", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 取消", callback_data="plugin_flexi_entry")]]), parse_mode='Markdown')
+        await query.edit_message_text("💳 **请输入用于兑换验证的 6位自定义卡 BIN：**\n(例如：`540449`，请直接回复纯数字)", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 取消", callback_data="plugin_flexi_entry")]]), parse_mode='Markdown')
         return
 
 async def process_flexi_login_flow(message, context, user, session, email, password, custom_bin):
@@ -384,7 +420,7 @@ async def process_flexi_login_flow(message, context, user, session, email, passw
             s_ok, s_msg = await asyncio.get_running_loop().run_in_executor(None, FlexiroamLogic.start_plan, session, app_token, target_id)
             act_text = "✅ 激活成功" if s_ok else f"⚠️ 激活失败: {s_msg}"
         else:
-            if r_ok: act_text = "⚠️ 兑换成功但未找到 Plan (可能延迟)"
+            if r_ok: act_text = "⚠️ 兑换成功但未找到 Plan (可能因接口延迟)"
         
         # 保存监控数据（包含 custom_bin）
         context.user_data['flexi_monitor_data'] = {'session': session, 'token': app_token, 'email': email, 'custom_bin': custom_bin}
@@ -406,12 +442,12 @@ async def flexiroam_text_handler(update: Update, context: ContextTypes.DEFAULT_T
 
     # BIN 输入
     if state == FLEXI_STATE_WAIT_BIN:
-        if not text.isdigit():
-            await update.message.reply_text("❌ BIN 格式错误，请输入纯数字。")
+        if not text.isdigit() or len(text) < 6:
+            await update.message.reply_text("❌ BIN 格式错误，请输入至少6位纯数字。")
             return
         context.user_data['flexi_custom_bin'] = text
         context.user_data['flexi_state'] = FLEXI_STATE_WAIT_LOGIN_EMAIL
-        await update.message.reply_text(f"✅ 卡 BIN 设置为: `{text}`\n🔑 **请输入已注册的邮箱地址：**", parse_mode='Markdown')
+        await update.message.reply_text(f"✅ 卡 BIN 设置为: `{text}`\n🔑 **请输入已注册的 Flexiroam 邮箱地址：**", parse_mode='Markdown')
         return
 
     # 登录邮箱输入
@@ -431,7 +467,7 @@ async def flexiroam_text_handler(update: Update, context: ContextTypes.DEFAULT_T
         custom_bin = context.user_data.get('flexi_custom_bin')
         context.user_data['flexi_state'] = FLEXI_STATE_NONE
         
-        status_msg = await update.message.reply_text("🚀 开始登录任务...")
+        status_msg = await update.message.reply_text("🚀 开始登录及领卡任务...")
         session = await asyncio.get_running_loop().run_in_executor(None, FlexiroamLogic.get_session)
         asyncio.create_task(process_flexi_login_flow(status_msg, context, user, session, email, password, custom_bin))
         return
@@ -440,4 +476,4 @@ def register_handlers(application):
     application.add_handler(CallbackQueryHandler(flexiroam_callback, pattern="^flexi_.*"))
     application.add_handler(CallbackQueryHandler(flexiroam_menu, pattern="^plugin_flexi_entry$"))
     application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), flexiroam_text_handler), group=1)
-    print("🔌 Flexiroam (Login-Only) 插件已加载")
+    print("🔌 Flexiroam (Login + Custom BIN) 插件已加载")
