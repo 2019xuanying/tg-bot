@@ -43,11 +43,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     is_auth = user_manager.is_authorized(user.id)
     is_admin = (str(user.id) == str(ADMIN_ID))
 
-# 动态检查插件状态
-        yanci_status = user_manager.get_plugin_status("yanci")
-        flexi_status = user_manager.get_plugin_status("flexiroam")
-        jetfi_status = user_manager.get_plugin_status("jetfi") 
-        rbesim_status = user_manager.get_plugin_status("rbesim")
+    # 动态检查插件状态 (注意：这里前面只能有 4 个空格)
+    yanci_status = user_manager.get_plugin_status("yanci")
+    flexi_status = user_manager.get_plugin_status("flexiroam")
+    jetfi_status = user_manager.get_plugin_status("jetfi") 
+    rbesim_status = user_manager.get_plugin_status("rbesim") # <--- 新增状态检查
 
     text = (
         f"🤖 **聚合控制中心**\n\n"
@@ -59,18 +59,18 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = []
 
     if is_auth:
-            text += "请选择要运行的功能模块："
-            
-            yanci_btn_text = "🌏 Yanci 抢单助手" if yanci_status else "🌏 Yanci (维护中)"
-            flexi_btn_text = "🌐 Flexiroam 助手" if flexi_status else "🌐 Flexiroam (维护中)"
-            jetfi_btn_text = "🚙 JetFi 助手" if jetfi_status else "🚙 JetFi (维护中)" 
-            rbesim_btn_text = "📡 RB eSIM 提取" if rbesim_status else "📡 RB eSIM (维护中)" # <--- 新增文字
+        text += "请选择要运行的功能模块："
+        
+        yanci_btn_text = "🌏 Yanci 抢单助手" if yanci_status else "🌏 Yanci (维护中)"
+        flexi_btn_text = "🌐 Flexiroam 助手" if flexi_status else "🌐 Flexiroam (维护中)"
+        jetfi_btn_text = "🚙 JetFi 助手" if jetfi_status else "🚙 JetFi (维护中)" 
+        rbesim_btn_text = "📡 RB eSIM 提取" if rbesim_status else "📡 RB eSIM (维护中)" # <--- 新增按钮文本
 
-            keyboard.append([InlineKeyboardButton(yanci_btn_text, callback_data="plugin_yanci_entry")])
-            keyboard.append([InlineKeyboardButton(flexi_btn_text, callback_data="plugin_flexi_entry")])
-            keyboard.append([InlineKeyboardButton(jetfi_btn_text, callback_data="plugin_jetfi_entry")])
-            keyboard.append([InlineKeyboardButton(rbesim_btn_text, callback_data="plugin_rbesim_entry")]) # <--- 新增按钮
-            keyboard.append([InlineKeyboardButton("🏝 TravelGooGoo 扫码", callback_data="plugin_travel_entry")])
+        keyboard.append([InlineKeyboardButton(yanci_btn_text, callback_data="plugin_yanci_entry")])
+        keyboard.append([InlineKeyboardButton(flexi_btn_text, callback_data="plugin_flexi_entry")])
+        keyboard.append([InlineKeyboardButton(jetfi_btn_text, callback_data="plugin_jetfi_entry")])
+        keyboard.append([InlineKeyboardButton(rbesim_btn_text, callback_data="plugin_rbesim_entry")]) # <--- 新增按钮
+        keyboard.append([InlineKeyboardButton("🏝 TravelGooGoo 扫码", callback_data="plugin_travel_entry")])
     else:
         text += "您目前没有使用权限，请点击下方按钮申请。"
         keyboard.append([InlineKeyboardButton("📝 申请使用权限", callback_data="global_request_auth")])
@@ -156,14 +156,14 @@ async def main_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         y_status = user_manager.get_plugin_status("yanci")
         f_status = user_manager.get_plugin_status("flexiroam")
         j_status = user_manager.get_plugin_status("jetfi") 
-        r_status = user_manager.get_plugin_status("rbesim")
+        r_status = user_manager.get_plugin_status("rbesim") # <--- 新增状态
         
         text = "🔧 **项目运行状态控制**\n点击按钮切换 开启/关闭 状态。"
         keyboard = [
             [InlineKeyboardButton(f"Yanci: {'🟢 开启' if y_status else '🔴 关闭'}", callback_data="admin_toggle_yanci")],
             [InlineKeyboardButton(f"Flexiroam: {'🟢 开启' if f_status else '🔴 关闭'}", callback_data="admin_toggle_flexi")],
-            [InlineKeyboardButton(f"JetFi: {'🟢 开启' if j_status else '🔴 关闭'}", callback_data="admin_toggle_jetfi")], # <--- 新增控制
-            [InlineKeyboardButton(f"RB eSIM: {'🟢 开启' if r_status else '🔴 关闭'}", callback_data="admin_toggle_rbesim")], # <--- 新增开关按钮
+            [InlineKeyboardButton(f"JetFi: {'🟢 开启' if j_status else '🔴 关闭'}", callback_data="admin_toggle_jetfi")],
+            [InlineKeyboardButton(f"RB eSIM: {'🟢 开启' if r_status else '🔴 关闭'}", callback_data="admin_toggle_rbesim")], # <--- 新增控制
             [InlineKeyboardButton("🔙 返回上级", callback_data="admin_menu_main")]
         ]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
@@ -333,6 +333,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
