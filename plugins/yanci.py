@@ -543,7 +543,7 @@ async def yanci_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     welcome_text = (
-        f"🌏 **Yanci 自动抢单助手**\n"
+        f"🌏 **Yanci 自动下单助手**\n"
         f"服务状态: {'✅ 运行中' if user_manager.get_config('bot_active', True) else '🔴 维护中'}\n\n"
         f"请选择操作："
     )
@@ -652,3 +652,4 @@ def register_handlers(application):
     application.add_handler(CallbackQueryHandler(yanci_menu, pattern="^plugin_yanci_entry$"))
     application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), yanci_text_handler))
     print("🔌 Yanci 插件已加载")
+
