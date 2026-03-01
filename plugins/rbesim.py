@@ -117,7 +117,7 @@ class RbesimLogic:
         url = "https://prod-rbesim.com/esim-deliver"
         headers = {
             "Host": "prod-rbesim.com",
-            "authorization": id_token, # 这里注入最新获取的 token
+            "authorization": id_token, # 注入最新获取的 token
             "content-length": "0",
             "accept-encoding": "gzip",
             "user-agent": "okhttp/4.9.2"
@@ -127,16 +127,25 @@ class RbesimLogic:
         try:
             resp = session.post(url, headers=headers, params=params, timeout=20)
             
-            # 格式化返回值以便于显示
-            result_text = resp.text
-            try:
-                result_text = json.dumps(resp.json(), indent=2, ensure_ascii=False)
-            except: pass
-                
             if resp.ok:
-                return True, f"🎉 **全自动提取成功 (HTTP {resp.status_code})**\n📧 邮箱: `{email}`\n\n📦 **服务器发货响应**:\n`{result_text[:1500]}`"
+                # 尝试用正则提取标准 LPA (例如: 1$smdp.com$0000-0000-0000)
+                lpa_match = re.search(r'(1\$[\w\.\-]+\$[\w\.\-]+)', resp.text)
+                
+                if lpa_match:
+                    lpa_info = lpa_match.group(1)
+                else:
+                    # 如果没匹配到 LPA，可能是 JSON 格式变了，截取部分原始返回以免消息超长
+                    lpa_info = f"未能自动解析，原始数据：\n`{resp.text[:500]}`"
+                
+                msg = (
+                    f"🎉 **全自动提取成功！**\n"
+                    f"📧 **邮箱**: `{email}`\n\n"
+                    f"📡 **LPA 安装代码**:\n`{lpa_info}`\n\n"
+                    f"🔑 **Firebase Token**:\n`{id_token}`"
+                )
+                return True, msg
             else:
-                return False, f"⚠️ **提取被拒 (HTTP {resp.status_code})**\n📧 邮箱: `{email}`\n\n📦 **错误信息**:\n`{result_text[:1500]}`"
+                return False, f"⚠️ **提取被拒 (HTTP {resp.status_code})**\n📧 邮箱: `{email}`\n\n📦 **错误信息**:\n`{resp.text[:500]}`"
                 
         except Exception as e:
             return False, f"❌ **最终请求失败 (超时或网络异常)**: {str(e)}"
@@ -160,7 +169,7 @@ async def rbesim_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     text = (
-        f"📡 **RB eSIM 提取助手 (全自动版)**\n"
+        f"📡 **RB eSIM 提取助手**\n"
         f"状态: {'✅ 运行中' if user_manager.get_config('bot_active', True) else '🔴 维护中'}\n\n"
         f"流程说明：\n"
         f"1️⃣ 随机生成邮箱并向服务器发送注册请求\n"
@@ -193,7 +202,7 @@ async def rbesim_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_manager.increment_usage(user.id, user.first_name)
         await query.edit_message_text(
             "⏳ **正在执行全自动任务...**\n"
-            "📡 正在与服务器进行 Token 交换和鉴权，请稍候约 5~10 秒...", 
+            "📡 正在与服务器进行 Token 交换和鉴权，请稍候几秒...", 
             parse_mode='Markdown'
         )
         asyncio.create_task(run_rbesim_task(query.message, context))
