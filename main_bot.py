@@ -61,7 +61,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if is_auth:
         text += "请选择要运行的功能模块："
         
-        yanci_btn_text = "🌏 Yanci 抢单助手" if yanci_status else "🌏 Yanci (维护中)"
+        yanci_btn_text = "🌏 Yanci 下单助手" if yanci_status else "🌏 Yanci (维护中)"
         flexi_btn_text = "🌐 Flexiroam 助手" if flexi_status else "🌐 Flexiroam (维护中)"
         jetfi_btn_text = "🚙 JetFi 助手" if jetfi_status else "🚙 JetFi (维护中)" 
         rbesim_btn_text = "📡 RB eSIM 提取" if rbesim_status else "📡 RB eSIM (维护中)" # <--- 新增按钮文本
@@ -333,6 +333,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
