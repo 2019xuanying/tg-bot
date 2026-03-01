@@ -4,6 +4,8 @@ import string
 import asyncio
 import traceback
 import json
+import urllib.parse
+import re
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, CallbackQueryHandler
 
@@ -19,47 +21,125 @@ class RbesimLogic:
         """随机生成一个邮箱地址"""
         chars = string.ascii_lowercase + string.digits
         user = ''.join(random.choice(chars) for _ in range(10))
-        domains = ["gmail.com", "outlook.com", "yahoo.com", "163.com", "baldur.edu.kg"]
+        domains = ["gmail.com", "outlook.com", "yahoo.com", "163.com", "baldur.edu.kg", "zenvex.edu.pl"]
         return f"{user}@{random.choice(domains)}"
 
     @staticmethod
-    def run_process():
-        # 使用框架提供的代理 session
-        session = get_safe_session(test_url="https://prod-rbesim.com", timeout=10)
-        url = "https://prod-rbesim.com/esim-deliver"
-        
-        # 用户提供的固定 Authorization JWT Token
-        jwt_token = "eyJhbGciOiJSUzI1NiIsImtpZCI6IjJjMjdhZmY1YzlkNGU1MzVkNWRjMmMwNWM1YTE2N2FlMmY1NjgxYzIiLCJ0eXAiOiJKV1QifQ.eyJpc3MiOiJodHRwczovL3NlY3VyZXRva2VuLmdvb2dsZS5jb20vcmVkbGF6ZXItcHJvZCIsImF1ZCI6InJlZGxhemVyLXByb2QiLCJhdXRoX3RpbWUiOjE3NzIzMzI5OTIsInVzZXJfaWQiOiJXamlLS2xUUmFPTjBOV3c4WmFsYjQzTjdxcWcxIiwic3ViIjoiV2ppS0tsVFJhT04wTld3OFphbGI0M043cXFnMSIsImlhdCI6MTc3MjMzMjk5MiwiZXhwIjoxNzcyMzM2NTkyLCJlbWFpbCI6InNyZHR5ZHlvY2lkeWlAYmFsZHVyLmVkdS5rZyIsImVtYWlsX3ZlcmlmaWVkIjp0cnVlLCJmaXJlYmFzZSI6eyJpZGVudGl0aWVzIjp7ImVtYWlsIjpbInNyZHR5ZHlvY2lkeWlAYmFsZHVyLmVkdS5rZyJdfSwic2lnbl9pbl9wcm92aWRlciI6InBhc3N3b3JkIn19.bnmASt8PRVtysPHnmeKu45U-wr6EKb-OxlYQw41Sy-ZG5Qlc90DbSOuDyzk3hilaGrk43YvdicS6jp2mERVBUVm8tN4g6X4O278103apMvpZ1iTnOh9cr2sxH2wKR4eq7sHQi64P06Y_59BZN40o9GdttZpysNeo9r8T-dhw6VRVIDwg0Sbs1d8k6nwual1q5fyh7BhAyisQo1a08Oqnxj0Ho9oU23gDXeqJ9nHa56-b1qbq4U8XYm75vERDflcX-iEjvOc-2EJQZNKoCrHWWepjqeoXPh1StbK84PbCEj93KnGUTAEBVSyWVnCZP7xd01aoCccZGjCfZjXbVuAr4w"
+    def get_oob_code(session, email):
+        """步骤 1：触发邮件并截取 oobCode"""
+        logger.info(f"[Rbesim] 步骤1: 正在为 {email} 触发登录邮件请求...")
+        encoded_email = urllib.parse.quote(email)
+        url = f"https://prod-rbesim.com/auth/send-email?email={encoded_email}"
         
         headers = {
             "Host": "prod-rbesim.com",
-            "authorization": jwt_token,
+            "user-agent": "okhttp/4.9.2",
+            "accept-encoding": "gzip",
+            "content-length": "0"
+        }
+        
+        try:
+            resp = session.post(url, headers=headers, timeout=15)
+            if not resp.ok:
+                return None, f"请求发送邮件失败 (HTTP {resp.status_code}): {resp.text}"
+            
+            data = resp.json()
+            auth_link = data.get("link")
+            if not auth_link:
+                return None, "响应中没有找到 link 字段！"
+            
+            # 提取 oobCode
+            match = re.search(r'oobCode(?:%3D|=)([^%&]+)', auth_link)
+            if match:
+                oob_code = match.group(1)
+                logger.info(f"[Rbesim] 成功提取 oobCode: {oob_code[:10]}...")
+                return oob_code, "成功"
+            else:
+                return None, "正则匹配 oobCode 失败！"
+                
+        except Exception as e:
+            return None, f"网络请求异常: {str(e)}"
+
+    @staticmethod
+    def get_firebase_token(session, email, oob_code):
+        """步骤 2：用 oobCode 兑换 Firebase idToken"""
+        logger.info(f"[Rbesim] 步骤2: 正在使用 oobCode 换取 idToken...")
+        api_key = "AIzaSyDSQtoo2mwKFxq5mgq9G5qx1vyDP2kdlBI"
+        url = f"https://www.googleapis.com/identitytoolkit/v3/relyingparty/emailLinkSignin?key={api_key}"
+        
+        headers = {
+            "Content-Type": "application/json",
+            "X-Android-Package": "com.kitemobile",
+            "X-Android-Cert": "9139793793EC1D50C7E82B93FF7FEE5B957791E1",
+            "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 10; RMX2117 Build/QP1A.190711.020)",
+        }
+        
+        payload = {
+            "email": email,
+            "oobCode": oob_code,
+            "clientType": "CLIENT_TYPE_ANDROID"
+        }
+
+        try:
+            resp = session.post(url, headers=headers, json=payload, timeout=15)
+            if not resp.ok:
+                return None, f"Firebase登录失败 (HTTP {resp.status_code}): {resp.text}"
+                
+            data = resp.json()
+            id_token = data.get('idToken')
+            if id_token:
+                logger.info(f"[Rbesim] 成功获取 idToken。")
+                return id_token, "成功"
+            else:
+                return None, "响应数据中不包含 idToken"
+                
+        except Exception as e:
+            return None, f"网络请求异常: {str(e)}"
+
+    @staticmethod
+    def run_process():
+        """执行完整的全自动化流水线"""
+        session = get_safe_session(test_url="https://prod-rbesim.com", timeout=10)
+        email = RbesimLogic.generate_random_email()
+        
+        # --- [步骤 1] 拿 oobCode ---
+        oob_code, msg1 = RbesimLogic.get_oob_code(session, email)
+        if not oob_code:
+            return False, f"❌ **第一步 (获取 oobCode) 失败**\n📧 邮箱: `{email}`\n⚠️ 原因: `{msg1}`"
+            
+        # --- [步骤 2] 换 idToken ---
+        id_token, msg2 = RbesimLogic.get_firebase_token(session, email, oob_code)
+        if not id_token:
+            return False, f"❌ **第二步 (换取 Token) 失败**\n📧 邮箱: `{email}`\n⚠️ 原因: `{msg2}`"
+
+        # --- [步骤 3] 请求最终的 eSIM 接口 ---
+        logger.info(f"[Rbesim] 步骤3: 携带新 Token 请求 esim-deliver 接口...")
+        url = "https://prod-rbesim.com/esim-deliver"
+        headers = {
+            "Host": "prod-rbesim.com",
+            "authorization": id_token, # 这里注入最新获取的 token
             "content-length": "0",
             "accept-encoding": "gzip",
             "user-agent": "okhttp/4.9.2"
         }
-        
-        email = RbesimLogic.generate_random_email()
         params = {"email": email}
         
         try:
-            logger.info(f"[Rbesim] 正在请求提取 eSIM, 使用邮箱: {email}")
-            resp = session.post(url, headers=headers, params=params, timeout=15)
+            resp = session.post(url, headers=headers, params=params, timeout=20)
             
-            # 尝试格式化返回的 JSON 以便于在 TG 中展示
+            # 格式化返回值以便于显示
             result_text = resp.text
             try:
                 result_text = json.dumps(resp.json(), indent=2, ensure_ascii=False)
-            except:
-                pass
+            except: pass
                 
             if resp.ok:
-                return True, f"✅ **提取成功 (HTTP {resp.status_code})**\n📧 随机邮箱: `{email}`\n\n📦 **服务器响应**:\n`{result_text[:1500]}`"
+                return True, f"🎉 **全自动提取成功 (HTTP {resp.status_code})**\n📧 邮箱: `{email}`\n\n📦 **服务器发货响应**:\n`{result_text[:1500]}`"
             else:
-                return False, f"⚠️ **提取失败 (HTTP {resp.status_code})**\n📧 随机邮箱: `{email}`\n\n📦 **错误信息**:\n`{result_text[:1500]}`"
+                return False, f"⚠️ **提取被拒 (HTTP {resp.status_code})**\n📧 邮箱: `{email}`\n\n📦 **错误信息**:\n`{result_text[:1500]}`"
                 
         except Exception as e:
-            return False, f"网络异常或请求超时: {str(e)}"
+            return False, f"❌ **最终请求失败 (超时或网络异常)**: {str(e)}"
 
 # ================= 交互处理 =================
 
@@ -80,13 +160,18 @@ async def rbesim_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     text = (
-        f"📡 **RB eSIM 提取助手**\n"
+        f"📡 **RB eSIM 提取助手 (全自动版)**\n"
         f"状态: {'✅ 运行中' if user_manager.get_config('bot_active', True) else '🔴 维护中'}\n\n"
-        f"点击下方按钮，系统将自动生成随机邮箱并发起提取请求。"
+        f"流程说明：\n"
+        f"1️⃣ 随机生成邮箱并向服务器发送注册请求\n"
+        f"2️⃣ 截获注册链接中的安全码 (oobCode)\n"
+        f"3️⃣ 动态换取 Firebase 登录凭证 (idToken)\n"
+        f"4️⃣ 携带新鲜凭证请求 eSIM 发货\n\n"
+        f"点击下方按钮，启动全自动流水线 👇"
     )
     
     keyboard = [
-        [InlineKeyboardButton("🚀 一键随机提取 eSIM", callback_data="rbesim_start")],
+        [InlineKeyboardButton("🚀 启动全自动提取", callback_data="rbesim_start")],
         [InlineKeyboardButton("🔙 返回主菜单", callback_data="main_menu_root")]
     ]
     
@@ -106,7 +191,11 @@ async def rbesim_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data == "rbesim_start":
         user_manager.increment_usage(user.id, user.first_name)
-        await query.edit_message_text("⏳ **正在生成随机邮箱并向服务器发送请求...**", parse_mode='Markdown')
+        await query.edit_message_text(
+            "⏳ **正在执行全自动任务...**\n"
+            "📡 正在与服务器进行 Token 交换和鉴权，请稍候约 5~10 秒...", 
+            parse_mode='Markdown'
+        )
         asyncio.create_task(run_rbesim_task(query.message, context))
         return
 
@@ -123,4 +212,4 @@ async def run_rbesim_task(message, context):
 def register_handlers(application):
     application.add_handler(CallbackQueryHandler(rbesim_callback, pattern="^rbesim_.*"))
     application.add_handler(CallbackQueryHandler(rbesim_menu, pattern="^plugin_rbesim_entry$"))
-    print("🔌 RB eSIM 插件已加载")
+    print("🔌 RB eSIM (全自动免过期版) 插件已加载")
