@@ -20,7 +20,7 @@ class RbesimLogic:
     @staticmethod
     def trigger_email(session, email):
         """步骤 1：请求业务后端，向目标邮箱发送登录验证邮件"""
-        logger.info(f"[Rbesim] 步骤1: 正在请求发送登录邮件至: {email} ...")
+        logger.info(f"[*] Step 1: Triggering login email request for {email}...")
         encoded_email = urllib.parse.quote(email)
         url = f"https://prod-rbesim.com/auth/send-email?email={encoded_email}"
         
@@ -34,16 +34,18 @@ class RbesimLogic:
         try:
             resp = session.post(url, headers=headers, timeout=15)
             if not resp.ok:
-                return False, f"请求发送邮件失败 (HTTP {resp.status_code}): {resp.text}"
-            logger.info("[Rbesim] 触发成功！后端已受理发信请求。")
-            return True, "成功"
+                logger.error(f"[-] Failed to send email request (HTTP {resp.status_code}): {resp.text}")
+                return False
+            logger.info("[+] Trigger successful! Backend accepted the email request.")
+            return True
         except Exception as e:
-            return False, f"网络请求异常: {str(e)}"
+            logger.error(f"[-] Network request exception in Step 1: {str(e)}")
+            return False
 
     @staticmethod
     async def wait_for_oobcode(mail_token, timeout=120, check_interval=5):
         """步骤 2：登录邮箱轮询接收邮件，并正则提取 oobCode"""
-        logger.info(f"[Rbesim] 步骤2: 正在连接邮箱等待接收 oobCode...")
+        logger.info(f"[*] Step 2: Waiting to receive oobCode via email...")
         import time
         start_time = time.time()
         while time.time() - start_time < timeout:
@@ -58,15 +60,16 @@ class RbesimLogic:
                         match = re.search(r'oobCode(?:%3D|=)([^%&"\'\s]+)', body)
                         if match:
                             oob_code = match.group(1)
-                            logger.info(f"[Rbesim] 成功提取到热乎的 oobCode: {oob_code[:15]}...")
-                            return oob_code, "成功"
+                            logger.info(f"[+] Successfully extracted fresh oobCode: {oob_code[:15]}...")
+                            return oob_code
             await asyncio.sleep(check_interval)
-        return None, "等待邮件超时！"
+        logger.warning("[-] Timeout waiting for email!")
+        return None
 
     @staticmethod
     def get_firebase_token(session, email, oob_code):
         """步骤 3：使用 oobCode 向 Firebase 换取身份令牌 (idToken)"""
-        logger.info(f"[Rbesim] 步骤3: 正在使用 oobCode 换取 idToken...")
+        logger.info(f"[*] Step 3: Exchanging oobCode for Firebase idToken...")
         api_key = "AIzaSyDSQtoo2mwKFxq5mgq9G5qx1vyDP2kdlBI"
         url = f"https://www.googleapis.com/identitytoolkit/v3/relyingparty/emailLinkSignin?key={api_key}"
         
@@ -86,18 +89,22 @@ class RbesimLogic:
         try:
             resp = session.post(url, headers=headers, json=payload, timeout=15)
             if not resp.ok:
-                return None, f"Firebase登录失败 (HTTP {resp.status_code}): {resp.text}"
+                logger.error(f"[-] Firebase login failed (HTTP {resp.status_code}): {resp.text}")
+                return None
                 
             data = resp.json()
             id_token = data.get('idToken')
             if id_token:
-                logger.info(f"[Rbesim] 成功获取 idToken。")
-                return id_token, "成功"
+                logger.info(f"[+] Login flow automated successfully!")
+                logger.info(f"[+] Obtained idToken: \n{id_token[:80]}......")
+                return id_token
             else:
-                return None, "响应数据中不包含 idToken"
+                logger.error("[-] Response data does not contain idToken")
+                return None
                 
         except Exception as e:
-            return None, f"网络请求异常: {str(e)}"
+            logger.error(f"[-] Token exchange failed: {str(e)}")
+            return None
 
     @staticmethod
     async def run_process():
@@ -109,25 +116,26 @@ class RbesimLogic:
         if not email or not mail_token:
             return False, "❌ **初始化失败**\n无法获取临时邮箱 (Mail.tm API 繁忙或失败)，请稍后重试。"
 
-        logger.info(f"[Rbesim] 成功生成临时邮箱: {email}")
+        logger.info(f"[*] Successfully generated temporary email: {email}")
 
         # --- [步骤 1] 触发邮件 ---
-        trigger_ok, msg1 = await asyncio.get_running_loop().run_in_executor(None, RbesimLogic.trigger_email, session, email)
+        trigger_ok = await asyncio.get_running_loop().run_in_executor(None, RbesimLogic.trigger_email, session, email)
         if not trigger_ok:
-            return False, f"❌ **第一步 (发送登录邮件) 失败**\n📧 邮箱: `{email}`\n⚠️ 原因: `{msg1}`"
+            return False, f"❌ **第一步 (发送登录邮件) 失败**\n📧 邮箱: `{email}`"
             
         # --- [步骤 2] 等待并提取 oobCode ---
-        oob_code, msg2 = await RbesimLogic.wait_for_oobcode(mail_token)
+        await asyncio.sleep(3) # Give email delivery some buffer time
+        oob_code = await RbesimLogic.wait_for_oobcode(mail_token)
         if not oob_code:
-            return False, f"❌ **第二步 (获取 oobCode) 失败**\n📧 邮箱: `{email}`\n⚠️ 原因: `{msg2}`"
+            return False, f"❌ **第二步 (获取 oobCode) 失败**\n📧 邮箱: `{email}`"
 
         # --- [步骤 3] 换 idToken ---
-        id_token, msg3 = await asyncio.get_running_loop().run_in_executor(None, RbesimLogic.get_firebase_token, session, email, oob_code)
+        id_token = await asyncio.get_running_loop().run_in_executor(None, RbesimLogic.get_firebase_token, session, email, oob_code)
         if not id_token:
-            return False, f"❌ **第三步 (换取 Token) 失败**\n📧 邮箱: `{email}`\n⚠️ 原因: `{msg3}`"
+            return False, f"❌ **第三步 (换取 Token) 失败**\n📧 邮箱: `{email}`"
 
         # --- [步骤 4] 请求最终的 eSIM 接口 ---
-        logger.info(f"[Rbesim] 步骤4: 携带新 Token 请求 esim-deliver 接口...")
+        logger.info(f"[*] Step 4: Requesting esim-deliver with new Token...")
         url = "https://prod-rbesim.com/esim-deliver"
         headers = {
             "Host": "prod-rbesim.com",
