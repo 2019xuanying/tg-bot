@@ -18,32 +18,7 @@ logger = logging.getLogger(__name__)
 
 class RbesimLogic:
     @staticmethod
-    def trigger_email(session, email):
-        """步骤 1：请求业务后端，向目标邮箱发送登录验证邮件"""
-        logger.info(f"[*] Step 1: Triggering login email request for {email}...")
-        encoded_email = urllib.parse.quote(email)
-        url = f"https://prod-rbesim.com/auth/send-email?email={encoded_email}"
-        
-        headers = {
-            "Host": "prod-rbesim.com",
-            "user-agent": "okhttp/4.9.2",
-            "accept-encoding": "gzip",
-            "content-length": "0"
-        }
-        
-        try:
-            resp = session.post(url, headers=headers, timeout=15)
-            if not resp.ok:
-                logger.error(f"[-] Failed to send email request (HTTP {resp.status_code}): {resp.text}")
-                return False
-            logger.info("[+] Trigger successful! Backend accepted the email request.")
-            return True
-        except Exception as e:
-            logger.error(f"[-] Network request exception in Step 1: {str(e)}")
-            return False
-
-    @staticmethod
-    async def wait_for_oobcode(mail_token, timeout=120, check_interval=5):
+    async def wait_for_oobcode(session, mail_token, timeout=120, check_interval=5):
         """步骤 2：登录邮箱轮询接收邮件，并正则提取 oobCode"""
         logger.info(f"[*] Step 2: Waiting to receive oobCode via email...")
         import time
@@ -71,8 +46,30 @@ class RbesimLogic:
                             oob_code = match.group(1)
                             logger.info(f"[+] Successfully extracted fresh oobCode: {oob_code[:15]}...")
                             return oob_code, "成功"
+                            
+                        # 新增逻辑：处理 SendGrid 追踪链接
+                        sg_match = re.search(r'(https?://[^\s"\'<>]+sendgrid\.net/ls/click[^\s"\'<>]+)', body)
+                        if sg_match:
+                            tracking_url = sg_match.group(1)
+                            logger.info(f"[*] Found SendGrid tracking link. Resolving redirect...")
+                            try:
+                                def resolve_url():
+                                    return session.get(tracking_url, timeout=15, allow_redirects=True)
+                                resp = await asyncio.get_running_loop().run_in_executor(None, resolve_url)
+                                
+                                # 从最终重定向的 URL 中提取 oobCode
+                                final_url = resp.url
+                                oob_match = re.search(r'oobCode(?:%3D|=)([A-Za-z0-9_-]+)', final_url)
+                                if oob_match:
+                                    oob_code = oob_match.group(1)
+                                    logger.info(f"[+] Successfully extracted oobCode from resolved URL: {oob_code[:15]}...")
+                                    return oob_code, "成功"
+                                else:
+                                    logger.warning(f"[-] Resolved URL does not contain oobCode: {final_url}")
+                            except Exception as e:
+                                logger.error(f"[-] Failed to resolve tracking link: {e}")
                         else:
-                            logger.warning("[-] Email body does not contain oobCode.")
+                            logger.warning("[-] Email body does not contain oobCode or SendGrid tracking link.")
             
             await asyncio.sleep(check_interval)
             
@@ -142,7 +139,7 @@ class RbesimLogic:
             
         # --- [步骤 2] 等待并提取 oobCode ---
         await asyncio.sleep(3) # Give email delivery some buffer time
-        oob_code, wait_msg = await RbesimLogic.wait_for_oobcode(mail_token)
+        oob_code, wait_msg = await RbesimLogic.wait_for_oobcode(session, mail_token)
         if not oob_code:
             return False, f"❌ **第二步 (获取验证码) 失败**\n📧 发送至: `{email}`\n⚠️ 原因: `{wait_msg}`"
 
