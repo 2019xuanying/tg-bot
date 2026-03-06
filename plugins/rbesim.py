@@ -187,7 +187,11 @@ class RbesimLogic:
         params = {"email": email}
         
         try:
-            resp = await asyncio.get_running_loop().run_in_executor(None, session.post, url, headers, params, 20)
+            # 修复 TypeError: 使用内部函数安全传递 kwargs 参数
+            def do_final_request():
+                return session.post(url, headers=headers, params=params, timeout=20)
+            
+            resp = await asyncio.get_running_loop().run_in_executor(None, do_final_request)
             
             if resp.ok:
                 # 尝试用正则提取标准 LPA (例如: 1$smdp.com$0000-0000-0000)
