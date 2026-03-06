@@ -48,23 +48,40 @@ class RbesimLogic:
         logger.info(f"[*] Step 2: Waiting to receive oobCode via email...")
         import time
         start_time = time.time()
+        received_count = 0
+        last_subject = ""
+        
         while time.time() - start_time < timeout:
             mails = await asyncio.get_running_loop().run_in_executor(None, MailTm.check_inbox, mail_token)
             if mails:
+                received_count = len(mails)
+                logger.info(f"[+] Found {received_count} emails in the inbox. Parsing...")
+                
                 for mail in mails:
                     # 获取最新的一封邮件
                     mail_detail = await asyncio.get_running_loop().run_in_executor(None, MailTm.get_message_content, mail_token, mail.get('id'))
                     if mail_detail:
                         body = mail_detail.get('body', '')
-                        # 正则提取 oobCode
-                        match = re.search(r'oobCode(?:%3D|=)([^%&"\'\s]+)', body)
+                        last_subject = mail_detail.get('subject', 'No Subject')
+                        logger.info(f"[*] Checking email with subject: {last_subject}")
+                        
+                        # 更健壮的正则：Firebase oobCode 只包含字母、数字、下划线和连字符
+                        match = re.search(r'oobCode(?:%3D|=)([A-Za-z0-9_-]+)', body)
                         if match:
                             oob_code = match.group(1)
                             logger.info(f"[+] Successfully extracted fresh oobCode: {oob_code[:15]}...")
-                            return oob_code
+                            return oob_code, "成功"
+                        else:
+                            logger.warning("[-] Email body does not contain oobCode.")
+            
             await asyncio.sleep(check_interval)
-        logger.warning("[-] Timeout waiting for email!")
-        return None
+            
+        if received_count > 0:
+            logger.warning(f"[-] Timeout. Received emails, but no oobCode found. Last subject: {last_subject}")
+            return None, f"收到了邮件 (标题: {last_subject[:15]})，但里面没有包含 oobCode，可能格式已变。"
+            
+        logger.warning("[-] Timeout waiting for email! Inbox is completely empty.")
+        return None, "等待超时。邮箱里一封信都没有 (目标网站可能拦截/屏蔽了 Mail.tm 临时邮箱域名)。"
 
     @staticmethod
     def get_firebase_token(session, email, oob_code):
@@ -121,13 +138,13 @@ class RbesimLogic:
         # --- [步骤 1] 触发邮件 ---
         trigger_ok = await asyncio.get_running_loop().run_in_executor(None, RbesimLogic.trigger_email, session, email)
         if not trigger_ok:
-            return False, f"❌ **第一步 (发送登录邮件) 失败**\n📧 邮箱: `{email}`"
+            return False, f"❌ **第一步 (发送登录邮件) 失败**\n📧 邮箱: `{email}`\n⚠️ 请检查日志或代理连接。"
             
         # --- [步骤 2] 等待并提取 oobCode ---
         await asyncio.sleep(3) # Give email delivery some buffer time
-        oob_code = await RbesimLogic.wait_for_oobcode(mail_token)
+        oob_code, wait_msg = await RbesimLogic.wait_for_oobcode(mail_token)
         if not oob_code:
-            return False, f"❌ **第二步 (获取 oobCode) 失败**\n📧 邮箱: `{email}`"
+            return False, f"❌ **第二步 (获取验证码) 失败**\n📧 发送至: `{email}`\n⚠️ 原因: `{wait_msg}`"
 
         # --- [步骤 3] 换 idToken ---
         id_token = await asyncio.get_running_loop().run_in_executor(None, RbesimLogic.get_firebase_token, session, email, oob_code)
