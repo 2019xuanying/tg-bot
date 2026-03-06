@@ -19,6 +19,31 @@ logger = logging.getLogger(__name__)
 
 class RbesimLogic:
     @staticmethod
+    def trigger_email(session, email):
+        """步骤 1：请求业务后端，向目标邮箱发送登录验证邮件"""
+        logger.info(f"[*] Step 1: Triggering login email request for {email}...")
+        encoded_email = urllib.parse.quote(email)
+        url = f"https://prod-rbesim.com/auth/send-email?email={encoded_email}"
+        
+        headers = {
+            "Host": "prod-rbesim.com",
+            "user-agent": "okhttp/4.9.2",
+            "accept-encoding": "gzip",
+            "content-length": "0"
+        }
+        
+        try:
+            resp = session.post(url, headers=headers, timeout=15)
+            if not resp.ok:
+                logger.error(f"[-] Failed to send email request (HTTP {resp.status_code}): {resp.text}")
+                return False
+            logger.info("[+] Trigger successful! Backend accepted the email request.")
+            return True
+        except Exception as e:
+            logger.error(f"[-] Network request exception in Step 1: {str(e)}")
+            return False
+
+    @staticmethod
     async def wait_for_oobcode(session, mail_token, timeout=120, check_interval=5):
         """步骤 2：登录邮箱轮询接收邮件，并正则提取 oobCode"""
         logger.info(f"[*] Step 2: Waiting to receive oobCode via email...")
