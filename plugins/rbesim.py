@@ -6,6 +6,7 @@ import traceback
 import json
 import urllib.parse
 import re
+import html
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, CallbackQueryHandler
 
@@ -128,25 +129,25 @@ class RbesimLogic:
         # 1. 自动生成 MailTm 临时邮箱
         email, mail_token = await asyncio.get_running_loop().run_in_executor(None, MailTm.create_account)
         if not email or not mail_token:
-            return False, "❌ **初始化失败**\n无法获取临时邮箱 (Mail.tm API 繁忙或失败)，请稍后重试。"
+            return False, "❌ <b>初始化失败</b>\n无法获取临时邮箱 (Mail.tm API 繁忙或失败)，请稍后重试。"
 
         logger.info(f"[*] Successfully generated temporary email: {email}")
 
         # --- [步骤 1] 触发邮件 ---
         trigger_ok = await asyncio.get_running_loop().run_in_executor(None, RbesimLogic.trigger_email, session, email)
         if not trigger_ok:
-            return False, f"❌ **第一步 (发送登录邮件) 失败**\n📧 邮箱: `{email}`\n⚠️ 请检查日志或代理连接。"
+            return False, f"❌ <b>第一步 (发送登录邮件) 失败</b>\n📧 邮箱: <code>{html.escape(email)}</code>\n⚠️ 请检查日志或代理连接。"
             
         # --- [步骤 2] 等待并提取 oobCode ---
         await asyncio.sleep(3) # Give email delivery some buffer time
         oob_code, wait_msg = await RbesimLogic.wait_for_oobcode(session, mail_token)
         if not oob_code:
-            return False, f"❌ **第二步 (获取验证码) 失败**\n📧 发送至: `{email}`\n⚠️ 原因: `{wait_msg}`"
+            return False, f"❌ <b>第二步 (获取验证码) 失败</b>\n📧 发送至: <code>{html.escape(email)}</code>\n⚠️ 原因: <code>{html.escape(wait_msg)}</code>"
 
         # --- [步骤 3] 换 idToken ---
         id_token = await asyncio.get_running_loop().run_in_executor(None, RbesimLogic.get_firebase_token, session, email, oob_code)
         if not id_token:
-            return False, f"❌ **第三步 (换取 Token) 失败**\n📧 邮箱: `{email}`"
+            return False, f"❌ <b>第三步 (换取 Token) 失败</b>\n📧 邮箱: <code>{html.escape(email)}</code>"
 
         # --- [步骤 4] 请求最终的 eSIM 接口 ---
         logger.info(f"[*] Step 4: Requesting esim-deliver with new Token...")
@@ -171,20 +172,20 @@ class RbesimLogic:
                     lpa_info = lpa_match.group(1)
                 else:
                     # 如果没匹配到 LPA，可能是 JSON 格式变了，截取部分原始返回以免消息超长
-                    lpa_info = f"未能自动解析，原始数据：\n`{resp.text[:500]}`"
+                    lpa_info = f"未能自动解析，原始数据：\n{resp.text[:500]}"
                 
                 msg = (
-                    f"🎉 **全自动提取成功！**\n"
-                    f"📧 **邮箱**: `{email}`\n\n"
-                    f"📡 **LPA 安装代码**:\n`{lpa_info}`\n\n"
-                    f"🔑 **Firebase Token**:\n`{id_token}`"
+                    f"🎉 <b>全自动提取成功！</b>\n"
+                    f"📧 <b>邮箱</b>: <code>{html.escape(email)}</code>\n\n"
+                    f"📡 <b>LPA 安装代码</b>:\n<code>{html.escape(lpa_info)}</code>\n\n"
+                    f"🔑 <b>Firebase Token</b>:\n<code>{html.escape(id_token)}</code>"
                 )
                 return True, msg
             else:
-                return False, f"⚠️ **提取被拒 (HTTP {resp.status_code})**\n📧 邮箱: `{email}`\n\n📦 **错误信息**:\n`{resp.text[:500]}`"
+                return False, f"⚠️ <b>提取被拒 (HTTP {resp.status_code})</b>\n📧 邮箱: <code>{html.escape(email)}</code>\n\n📦 <b>错误信息</b>:\n<code>{html.escape(resp.text[:500])}</code>"
                 
         except Exception as e:
-            return False, f"❌ **最终请求失败 (超时或网络异常)**: {str(e)}"
+            return False, f"❌ <b>最终请求失败 (超时或网络异常)</b>: <code>{html.escape(str(e))}</code>"
 
 # ================= 交互处理 =================
 
@@ -198,19 +199,19 @@ async def rbesim_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not user_manager.get_plugin_status("rbesim") and str(user.id) != str(ADMIN_ID):
         await update.callback_query.edit_message_text(
-            "🛑 **该功能目前维护中**\n\n请稍后再试，或联系管理员。",
+            "🛑 <b>该功能目前维护中</b>\n\n请稍后再试，或联系管理员。",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 返回主菜单", callback_data="main_menu_root")]]),
-            parse_mode='Markdown'
+            parse_mode='HTML'
         )
         return
 
     text = (
-        f"📡 **RB eSIM 提取助手**\n"
+        f"📡 <b>RB eSIM 提取助手</b>\n"
         f"状态: {'✅ 运行中' if user_manager.get_config('bot_active', True) else '🔴 维护中'}\n\n"
         f"流程说明：\n"
         f"1️⃣ 自动获取 Mail.tm 临时邮箱\n"
         f"2️⃣ 触发登录验证邮件并自动监听收件箱\n"
-        f"3️⃣ 正则提取 oobCode 并换取 Firebase idToken\n"
+        f"3️⃣ 追踪跳转并换取 Firebase idToken\n"
         f"4️⃣ 携带凭证请求发货，提取 LPA 代码\n\n"
         f"点击下方按钮，启动全自动流水线 👇"
     )
@@ -221,9 +222,9 @@ async def rbesim_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     
     if update.callback_query:
-        await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+        await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
     else:
-        await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+        await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
 
 async def rbesim_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -237,9 +238,9 @@ async def rbesim_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "rbesim_start":
         user_manager.increment_usage(user.id, user.first_name)
         await query.edit_message_text(
-            "⏳ **正在执行全自动任务...**\n"
+            "⏳ <b>正在执行全自动任务...</b>\n"
             "📡 正在获取临时邮箱并与服务器进行交互，此过程可能需要 15~60 秒，请耐心等待...", 
-            parse_mode='Markdown'
+            parse_mode='HTML'
         )
         asyncio.create_task(run_rbesim_task(query.message, context))
         return
@@ -248,10 +249,10 @@ async def run_rbesim_task(message, context):
     try:
         success, result = await RbesimLogic.run_process()
         keyboard = [[InlineKeyboardButton("🔙 返回 RB eSIM 菜单", callback_data="plugin_rbesim_entry")]]
-        await message.edit_text(result, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+        await message.edit_text(result, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
     except Exception as e:
         logger.error(traceback.format_exc())
-        await message.edit_text(f"💥 **系统内部错误**: {str(e)}", parse_mode='Markdown')
+        await message.edit_text(f"💥 <b>系统内部错误</b>: <code>{html.escape(str(e))}</code>", parse_mode='HTML')
 
 def register_handlers(application):
     application.add_handler(CallbackQueryHandler(rbesim_callback, pattern="^rbesim_.*"))
