@@ -15,6 +15,7 @@ from plugins import flexiroam
 from plugins import jetfi  # <--- 新增导入
 from plugins import travelgoogoo  # <--- 新增
 from plugins import rbesim
+from plugins import kitesim
 
 # 配置日志
 logging.basicConfig(
@@ -48,6 +49,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     flexi_status = user_manager.get_plugin_status("flexiroam")
     jetfi_status = user_manager.get_plugin_status("jetfi") 
     rbesim_status = user_manager.get_plugin_status("rbesim") # <--- 新增状态检查
+    kitesim_status = user_manager.get_plugin_status("kitesim")
 
     text = (
         f"🤖 **聚合控制中心**\n\n"
@@ -64,12 +66,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         yanci_btn_text = "🌏 Yanci 下单助手" if yanci_status else "🌏 Yanci (维护中)"
         flexi_btn_text = "🌐 Flexiroam 助手" if flexi_status else "🌐 Flexiroam (维护中)"
         jetfi_btn_text = "🚙 JetFi 助手" if jetfi_status else "🚙 JetFi (维护中)" 
-        rbesim_btn_text = "📡 RB eSIM 提取" if rbesim_status else "📡 RB eSIM (维护中)" # <--- 新增按钮文本
+        rbesim_btn_text = "📡 RB eSIM 提取" if rbesim_status else "📡 RB eSIM (维护中)" 
+        kitesim_btn_text = "🪁 Kite eSIM 爆破" if kitesim_status else "🪁 Kite eSIM (维护中)" # <--- 新增按钮文本
 
         keyboard.append([InlineKeyboardButton(yanci_btn_text, callback_data="plugin_yanci_entry")])
         keyboard.append([InlineKeyboardButton(flexi_btn_text, callback_data="plugin_flexi_entry")])
         keyboard.append([InlineKeyboardButton(jetfi_btn_text, callback_data="plugin_jetfi_entry")])
         keyboard.append([InlineKeyboardButton(rbesim_btn_text, callback_data="plugin_rbesim_entry")]) # <--- 新增按钮
+        keyboard.append([InlineKeyboardButton(kitesim_btn_text, callback_data="plugin_kitesim_entry")]) 
         keyboard.append([InlineKeyboardButton("🏝 TravelGooGoo 扫码", callback_data="plugin_travel_entry")])
     else:
         text += "您目前没有使用权限，请点击下方按钮申请。"
@@ -156,7 +160,8 @@ async def main_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         y_status = user_manager.get_plugin_status("yanci")
         f_status = user_manager.get_plugin_status("flexiroam")
         j_status = user_manager.get_plugin_status("jetfi") 
-        r_status = user_manager.get_plugin_status("rbesim") # <--- 新增状态
+        r_status = user_manager.get_plugin_status("rbesim")
+        k_status = user_manager.get_plugin_status("kitesim") # <--- 新增状态
         
         text = "🔧 **项目运行状态控制**\n点击按钮切换 开启/关闭 状态。"
         keyboard = [
@@ -164,6 +169,7 @@ async def main_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton(f"Flexiroam: {'🟢 开启' if f_status else '🔴 关闭'}", callback_data="admin_toggle_flexi")],
             [InlineKeyboardButton(f"JetFi: {'🟢 开启' if j_status else '🔴 关闭'}", callback_data="admin_toggle_jetfi")],
             [InlineKeyboardButton(f"RB eSIM: {'🟢 开启' if r_status else '🔴 关闭'}", callback_data="admin_toggle_rbesim")], # <--- 新增控制
+            [InlineKeyboardButton(f"Kite eSIM: {'🟢 开启' if k_status else '🔴 关闭'}", callback_data="admin_toggle_kitesim")], # <--- 新增开关
             [InlineKeyboardButton("🔙 返回上级", callback_data="admin_menu_main")]
         ]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
@@ -190,6 +196,12 @@ async def main_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data == "admin_toggle_rbesim":
         user_manager.toggle_plugin("rbesim")
+        update.callback_query.data = "admin_ctrl_plugins"
+        await main_callback(update, context)
+        return
+        
+    if data == "admin_toggle_kitesim":
+        user_manager.toggle_plugin("kitesim")
         update.callback_query.data = "admin_ctrl_plugins"
         await main_callback(update, context)
         return
@@ -318,6 +330,7 @@ def main():
     jetfi.register_handlers(application) # <--- 注册新插件
     travelgoogoo.register_handlers(application)
     rbesim.register_handlers(application)
+    kitesim.register_handlers(application)
 
     # === 启动状态打印 ===
     use_proxy = user_manager.get_config("use_proxy", True)
