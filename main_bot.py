@@ -12,10 +12,11 @@ from utils.database import user_manager, ADMIN_ID
 # 导入插件
 from plugins import yanci
 from plugins import flexiroam
-from plugins import jetfi  # <--- 新增导入
-from plugins import travelgoogoo  # <--- 新增
+from plugins import jetfi  
+from plugins import travelgoogoo  
 from plugins import rbesim
 from plugins import kitesim
+from plugins import ivideo  # <--- 新增 iVideo 导入
 
 # 配置日志
 logging.basicConfig(
@@ -44,12 +45,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     is_auth = user_manager.is_authorized(user.id)
     is_admin = (str(user.id) == str(ADMIN_ID))
 
-    # 动态检查插件状态 (注意：这里前面只能有 4 个空格)
+    # 动态检查插件状态
     yanci_status = user_manager.get_plugin_status("yanci")
     flexi_status = user_manager.get_plugin_status("flexiroam")
     jetfi_status = user_manager.get_plugin_status("jetfi") 
-    rbesim_status = user_manager.get_plugin_status("rbesim") # <--- 新增状态检查
+    rbesim_status = user_manager.get_plugin_status("rbesim")
     kitesim_status = user_manager.get_plugin_status("kitesim")
+    ivideo_status = user_manager.get_plugin_status("ivideo")  # <--- 新增状态检查
 
     text = (
         f"🤖 **聚合控制中心**\n\n"
@@ -67,12 +69,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         flexi_btn_text = "🌐 Flexiroam 助手" if flexi_status else "🌐 Flexiroam (维护中)"
         jetfi_btn_text = "🚙 JetFi 助手" if jetfi_status else "🚙 JetFi (维护中)" 
         rbesim_btn_text = "📡 RB eSIM 提取" if rbesim_status else "📡 RB eSIM (维护中)" 
-        kitesim_btn_text = "🪁 Kite eSIM 爆破" if kitesim_status else "🪁 Kite eSIM (维护中)" # <--- 新增按钮文本
+        kitesim_btn_text = "🪁 Kite eSIM 爆破" if kitesim_status else "🪁 Kite eSIM (维护中)"
+        ivideo_btn_text = "📼 iVideo 助手" if ivideo_status else "📼 iVideo (维护中)" # <--- 新增按钮文本
 
         keyboard.append([InlineKeyboardButton(yanci_btn_text, callback_data="plugin_yanci_entry")])
         keyboard.append([InlineKeyboardButton(flexi_btn_text, callback_data="plugin_flexi_entry")])
         keyboard.append([InlineKeyboardButton(jetfi_btn_text, callback_data="plugin_jetfi_entry")])
-        keyboard.append([InlineKeyboardButton(rbesim_btn_text, callback_data="plugin_rbesim_entry")]) # <--- 新增按钮
+        keyboard.append([InlineKeyboardButton(rbesim_btn_text, callback_data="plugin_rbesim_entry")]) 
+        keyboard.append([InlineKeyboardButton(ivideo_btn_text, callback_data="plugin_ivideo_entry")]) # <--- 新增按钮
         keyboard.append([InlineKeyboardButton(kitesim_btn_text, callback_data="plugin_kitesim_entry")]) 
         keyboard.append([InlineKeyboardButton("🏝 TravelGooGoo 扫码", callback_data="plugin_travel_entry")])
     else:
@@ -161,15 +165,17 @@ async def main_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f_status = user_manager.get_plugin_status("flexiroam")
         j_status = user_manager.get_plugin_status("jetfi") 
         r_status = user_manager.get_plugin_status("rbesim")
-        k_status = user_manager.get_plugin_status("kitesim") # <--- 新增状态
+        k_status = user_manager.get_plugin_status("kitesim")
+        i_status = user_manager.get_plugin_status("ivideo") # <--- 新增状态
         
         text = "🔧 **项目运行状态控制**\n点击按钮切换 开启/关闭 状态。"
         keyboard = [
             [InlineKeyboardButton(f"Yanci: {'🟢 开启' if y_status else '🔴 关闭'}", callback_data="admin_toggle_yanci")],
             [InlineKeyboardButton(f"Flexiroam: {'🟢 开启' if f_status else '🔴 关闭'}", callback_data="admin_toggle_flexi")],
             [InlineKeyboardButton(f"JetFi: {'🟢 开启' if j_status else '🔴 关闭'}", callback_data="admin_toggle_jetfi")],
-            [InlineKeyboardButton(f"RB eSIM: {'🟢 开启' if r_status else '🔴 关闭'}", callback_data="admin_toggle_rbesim")], # <--- 新增控制
-            [InlineKeyboardButton(f"Kite eSIM: {'🟢 开启' if k_status else '🔴 关闭'}", callback_data="admin_toggle_kitesim")], # <--- 新增开关
+            [InlineKeyboardButton(f"RB eSIM: {'🟢 开启' if r_status else '🔴 关闭'}", callback_data="admin_toggle_rbesim")], 
+            [InlineKeyboardButton(f"iVideo: {'🟢 开启' if i_status else '🔴 关闭'}", callback_data="admin_toggle_ivideo")], # <--- 新增控制
+            [InlineKeyboardButton(f"Kite eSIM: {'🟢 开启' if k_status else '🔴 关闭'}", callback_data="admin_toggle_kitesim")],
             [InlineKeyboardButton("🔙 返回上级", callback_data="admin_menu_main")]
         ]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
@@ -188,7 +194,7 @@ async def main_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await main_callback(update, context)
         return
 
-    if data == "admin_toggle_jetfi": # <--- 新增切换逻辑
+    if data == "admin_toggle_jetfi": 
         user_manager.toggle_plugin("jetfi")
         update.callback_query.data = "admin_ctrl_plugins"
         await main_callback(update, context)
@@ -202,6 +208,12 @@ async def main_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     if data == "admin_toggle_kitesim":
         user_manager.toggle_plugin("kitesim")
+        update.callback_query.data = "admin_ctrl_plugins"
+        await main_callback(update, context)
+        return
+
+    if data == "admin_toggle_ivideo": # <--- 新增切换逻辑
+        user_manager.toggle_plugin("ivideo")
         update.callback_query.data = "admin_ctrl_plugins"
         await main_callback(update, context)
         return
@@ -327,10 +339,11 @@ def main():
     # 3. 加载插件
     yanci.register_handlers(application)
     flexiroam.register_handlers(application)
-    jetfi.register_handlers(application) # <--- 注册新插件
+    jetfi.register_handlers(application)
     travelgoogoo.register_handlers(application)
     rbesim.register_handlers(application)
     kitesim.register_handlers(application)
+    ivideo.register_handlers(application) # <--- 注册新插件 iVideo
 
     # === 启动状态打印 ===
     use_proxy = user_manager.get_config("use_proxy", True)
@@ -341,13 +354,8 @@ def main():
     logger.info(f"当前代理数量: {len(proxies)}")
     print("="*30 + "\n")
     
-    print("✅ 机器人已启动 (Yanci + Flexiroam + JetFi)...")
+    print("✅ 机器人已启动 (Yanci + Flexiroam + JetFi + iVideo等)...")
     application.run_polling()
 
 if __name__ == '__main__':
     main()
-
-
-
-
-
