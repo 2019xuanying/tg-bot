@@ -212,7 +212,7 @@ async def main_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await main_callback(update, context)
         return
 
-     if data == "admin_toggle_iVideo":
+    if data == "admin_toggle_iVideo":
         user_manager.toggle_plugin("iVideo")
         update.callback_query.data = "admin_ctrl_plugins"
         await main_callback(update, context)
