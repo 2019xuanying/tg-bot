@@ -51,7 +51,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     jetfi_status = user_manager.get_plugin_status("jetfi") 
     rbesim_status = user_manager.get_plugin_status("rbesim") # <--- 新增状态检查
     kitesim_status = user_manager.get_plugin_status("kitesim")
-    kitesim_status = user_manager.get_plugin_status("ivideo")
+    ivideo_status = user_manager.get_plugin_status("ivideo")
 
     text = (
         f"🤖 **聚合控制中心**\n\n"
@@ -70,7 +70,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         jetfi_btn_text = "🚙 JetFi 助手" if jetfi_status else "🚙 JetFi (维护中)" 
         rbesim_btn_text = "📡 RB eSIM 提取" if rbesim_status else "📡 RB eSIM (维护中)" 
         kitesim_btn_text = "🪁 Kite eSIM 爆破" if kitesim_status else "🪁 Kite eSIM (维护中)" # <--- 新增按钮文本
-        kitesim_btn_text = " iVideo eSIM 提取" if kitesim_status else " ivideo eSIM (维护中)"
+        ivideo_btn_text = " iVideo eSIM 提取" if kitesim_status else " ivideo eSIM (维护中)"
 
         keyboard.append([InlineKeyboardButton(yanci_btn_text, callback_data="plugin_yanci_entry")])
         keyboard.append([InlineKeyboardButton(flexi_btn_text, callback_data="plugin_flexi_entry")])
