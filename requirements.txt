@@ -5,3 +5,4 @@ PySocks
 schedule
 pyzbar
 Pillow
+beautifulsoup4
