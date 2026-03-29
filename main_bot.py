@@ -12,10 +12,11 @@ from utils.database import user_manager, ADMIN_ID
 # 导入插件
 from plugins import yanci
 from plugins import flexiroam
-from plugins import jetfi  # <--- 新增导入
-from plugins import travelgoogoo  # <--- 新增
+from plugins import jetfi
+from plugins import travelgoogoo
 from plugins import rbesim
 from plugins import kitesim
+from plugins import ivideo  # <--- 新增 iVideo 插件导入
 
 # 配置日志
 logging.basicConfig(
@@ -44,12 +45,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     is_auth = user_manager.is_authorized(user.id)
     is_admin = (str(user.id) == str(ADMIN_ID))
 
-    # 动态检查插件状态 (注意：这里前面只能有 4 个空格)
+    # 动态检查插件状态
     yanci_status = user_manager.get_plugin_status("yanci")
     flexi_status = user_manager.get_plugin_status("flexiroam")
     jetfi_status = user_manager.get_plugin_status("jetfi") 
-    rbesim_status = user_manager.get_plugin_status("rbesim") # <--- 新增状态检查
+    rbesim_status = user_manager.get_plugin_status("rbesim")
     kitesim_status = user_manager.get_plugin_status("kitesim")
+    ivideo_status = user_manager.get_plugin_status("ivideo") # <--- 新增状态检查
 
     text = (
         f"🤖 **聚合控制中心**\n\n"
@@ -67,13 +69,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         flexi_btn_text = "🌐 Flexiroam 助手" if flexi_status else "🌐 Flexiroam (维护中)"
         jetfi_btn_text = "🚙 JetFi 助手" if jetfi_status else "🚙 JetFi (维护中)" 
         rbesim_btn_text = "📡 RB eSIM 提取" if rbesim_status else "📡 RB eSIM (维护中)" 
-        kitesim_btn_text = "🪁 Kite eSIM 爆破" if kitesim_status else "🪁 Kite eSIM (维护中)" # <--- 新增按钮文本
+        kitesim_btn_text = "🪁 Kite eSIM 爆破" if kitesim_status else "🪁 Kite eSIM (维护中)"
+        ivideo_btn_text = "📹 iVideo 0元下单" if ivideo_status else "📹 iVideo (维护中)" # <--- 新增按钮文本
 
         keyboard.append([InlineKeyboardButton(yanci_btn_text, callback_data="plugin_yanci_entry")])
         keyboard.append([InlineKeyboardButton(flexi_btn_text, callback_data="plugin_flexi_entry")])
         keyboard.append([InlineKeyboardButton(jetfi_btn_text, callback_data="plugin_jetfi_entry")])
-        keyboard.append([InlineKeyboardButton(rbesim_btn_text, callback_data="plugin_rbesim_entry")]) # <--- 新增按钮
+        keyboard.append([InlineKeyboardButton(rbesim_btn_text, callback_data="plugin_rbesim_entry")])
         keyboard.append([InlineKeyboardButton(kitesim_btn_text, callback_data="plugin_kitesim_entry")]) 
+        keyboard.append([InlineKeyboardButton(ivideo_btn_text, callback_data="plugin_ivideo_entry")]) # <--- 新增按钮
         keyboard.append([InlineKeyboardButton("🏝 TravelGooGoo 扫码", callback_data="plugin_travel_entry")])
     else:
         text += "您目前没有使用权限，请点击下方按钮申请。"
@@ -102,7 +106,7 @@ async def main_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await start(update, context)
         return
 
-    # === 权限申请逻辑 (保持不变) ===
+    # 权限申请逻辑
     if data == "global_request_auth":
         if not ADMIN_ID:
             await query.edit_message_text("❌ 未配置管理员 ID。")
@@ -119,7 +123,7 @@ async def main_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("❌ 发送失败。")
         return
 
-    # === 管理员审批逻辑 (保持不变) ===
+    # 管理员审批逻辑
     if data.startswith("global_agree_"):
         if str(user.id) != str(ADMIN_ID): return
         target_uid = data.split("_")[-1]
@@ -139,10 +143,9 @@ async def main_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ================= 管理员后台逻辑 =================
     
-    # 1. 管理员主菜单
     if data == "admin_menu_main":
         if str(user.id) != str(ADMIN_ID): return
-        context.user_data['admin_state'] = ADMIN_STATE_NONE # 清除状态
+        context.user_data['admin_state'] = ADMIN_STATE_NONE
         
         text = "👮 **管理员控制台**"
         keyboard = [
@@ -154,65 +157,44 @@ async def main_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
         return
 
-    # 2. 项目开关控制
     if data == "admin_ctrl_plugins":
         if str(user.id) != str(ADMIN_ID): return
         y_status = user_manager.get_plugin_status("yanci")
         f_status = user_manager.get_plugin_status("flexiroam")
         j_status = user_manager.get_plugin_status("jetfi") 
         r_status = user_manager.get_plugin_status("rbesim")
-        k_status = user_manager.get_plugin_status("kitesim") # <--- 新增状态
+        k_status = user_manager.get_plugin_status("kitesim")
+        i_status = user_manager.get_plugin_status("ivideo") # <--- 新增状态
         
         text = "🔧 **项目运行状态控制**\n点击按钮切换 开启/关闭 状态。"
         keyboard = [
             [InlineKeyboardButton(f"Yanci: {'🟢 开启' if y_status else '🔴 关闭'}", callback_data="admin_toggle_yanci")],
             [InlineKeyboardButton(f"Flexiroam: {'🟢 开启' if f_status else '🔴 关闭'}", callback_data="admin_toggle_flexi")],
             [InlineKeyboardButton(f"JetFi: {'🟢 开启' if j_status else '🔴 关闭'}", callback_data="admin_toggle_jetfi")],
-            [InlineKeyboardButton(f"RB eSIM: {'🟢 开启' if r_status else '🔴 关闭'}", callback_data="admin_toggle_rbesim")], # <--- 新增控制
-            [InlineKeyboardButton(f"Kite eSIM: {'🟢 开启' if k_status else '🔴 关闭'}", callback_data="admin_toggle_kitesim")], # <--- 新增开关
+            [InlineKeyboardButton(f"RB eSIM: {'🟢 开启' if r_status else '🔴 关闭'}", callback_data="admin_toggle_rbesim")],
+            [InlineKeyboardButton(f"Kite eSIM: {'🟢 开启' if k_status else '🔴 关闭'}", callback_data="admin_toggle_kitesim")],
+            [InlineKeyboardButton(f"iVideo: {'🟢 开启' if i_status else '🔴 关闭'}", callback_data="admin_toggle_ivideo")], # <--- 新增控制按钮
             [InlineKeyboardButton("🔙 返回上级", callback_data="admin_menu_main")]
         ]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
         return
 
-    # === 插件开关逻辑 ===
-    if data == "admin_toggle_yanci":
-        user_manager.toggle_plugin("yanci")
-        update.callback_query.data = "admin_ctrl_plugins"
-        await main_callback(update, context)
-        return
+    # 插件开关切换逻辑
+    plugin_toggles = ["yanci", "flexi", "jetfi", "rbesim", "kitesim", "ivideo"] # <--- 加入 ivideo
+    for p in plugin_toggles:
+        if data == f"admin_toggle_{p}":
+            # 数据库键名为 ivideo
+            db_key = "flexiroam" if p == "flexi" else p
+            user_manager.toggle_plugin(db_key)
+            update.callback_query.data = "admin_ctrl_plugins"
+            await main_callback(update, context)
+            return
 
-    if data == "admin_toggle_flexi":
-        user_manager.toggle_plugin("flexiroam")
-        update.callback_query.data = "admin_ctrl_plugins"
-        await main_callback(update, context)
-        return
-
-    if data == "admin_toggle_jetfi": # <--- 新增切换逻辑
-        user_manager.toggle_plugin("jetfi")
-        update.callback_query.data = "admin_ctrl_plugins"
-        await main_callback(update, context)
-        return
-
-    if data == "admin_toggle_rbesim":
-        user_manager.toggle_plugin("rbesim")
-        update.callback_query.data = "admin_ctrl_plugins"
-        await main_callback(update, context)
-        return
-        
-    if data == "admin_toggle_kitesim":
-        user_manager.toggle_plugin("kitesim")
-        update.callback_query.data = "admin_ctrl_plugins"
-        await main_callback(update, context)
-        return
-
-    # 3. 代理池管理 (保持不变)
+    # 代理池管理
     if data == "admin_ctrl_proxies":
         if str(user.id) != str(ADMIN_ID): return
-        
         proxy_list = user_manager.get_proxies()
         use_proxy = user_manager.get_config("use_proxy", True)
-        
         text = (
             f"🌍 **代理池管理**\n\n"
             f"当前状态: {'🟢 已开启' if use_proxy else '🔴 已关闭'}\n"
@@ -244,17 +226,11 @@ async def main_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data == "admin_proxy_import":
         context.user_data['admin_state'] = ADMIN_WAIT_PROXY_LIST
-        text = (
-            "📥 **请直接回复代理列表**\n\n"
-            "每行一个，支持两种格式混用。\n"
-            "例如：\n"
-            "`1.1.1.1:8080:user:pass`\n"
-            "`2.2.2.2:9090`"
-        )
+        text = "📥 **请直接回复代理列表**\n\n每行一个，支持两种格式混用。"
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 取消", callback_data="admin_ctrl_proxies")]]), parse_mode='Markdown')
         return
 
-    # 4. 用户管理 (保持不变)
+    # 用户管理
     if data == "admin_ctrl_users":
         if str(user.id) != str(ADMIN_ID): return
         users = user_manager.get_all_users()
@@ -281,30 +257,19 @@ async def main_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
 async def admin_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """处理管理员的文本输入 (如导入代理)"""
     user = update.effective_user
-    if str(user.id) != str(ADMIN_ID): return # 仅限管理员
+    if str(user.id) != str(ADMIN_ID): return 
 
     state = context.user_data.get('admin_state', ADMIN_STATE_NONE)
-    
     if state == ADMIN_WAIT_PROXY_LIST:
         text = update.message.text
         lines = text.strip().split('\n')
-        new_proxies = []
-        for line in lines:
-            line = line.strip()
-            if not line: continue
-            # 简单校验格式
-            parts = line.split(':')
-            if len(parts) in [2, 4]:
-                new_proxies.append(line)
-        
+        new_proxies = [l.strip() for l in lines if l.strip() and len(l.split(':')) in [2, 4]]
         if new_proxies:
             user_manager.add_proxies(new_proxies)
             msg = f"✅ 成功导入 {len(new_proxies)} 个代理！"
         else:
             msg = "⚠️ 未识别到有效代理格式。"
-            
         context.user_data['admin_state'] = ADMIN_STATE_NONE
         await update.message.reply_text(msg, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 返回代理管理", callback_data="admin_ctrl_proxies")]]))
         return
@@ -317,36 +282,22 @@ async def post_init(application):
 def main():
     application = ApplicationBuilder().token(BOT_TOKEN).post_init(post_init).build()
     
-    # 1. 注册主程序
+    # 注册核心处理器
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CallbackQueryHandler(main_callback, pattern="^main_menu_root$|^global_.*|^admin_.*"))
-    
-    # 2. 注册管理员文本处理器 (优先级最高 group=0)
     application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), admin_text_handler), group=0)
     
-    # 3. 加载插件
+    # 加载所有插件
     yanci.register_handlers(application)
     flexiroam.register_handlers(application)
-    jetfi.register_handlers(application) # <--- 注册新插件
+    jetfi.register_handlers(application)
     travelgoogoo.register_handlers(application)
     rbesim.register_handlers(application)
     kitesim.register_handlers(application)
+    ivideo.register_handlers(application)  # <--- 新增 iVideo 处理器注册
 
-    # === 启动状态打印 ===
-    use_proxy = user_manager.get_config("use_proxy", True)
-    proxies = user_manager.get_proxies()
-    
-    print("\n" + "="*30)
-    logger.info(f"代理系统状态: {'🟢 开启' if use_proxy else '🔴 关闭'}")
-    logger.info(f"当前代理数量: {len(proxies)}")
-    print("="*30 + "\n")
-    
-    print("✅ 机器人已启动 (Yanci + Flexiroam + JetFi)...")
+    print("✅ 机器人已启动 (聚合控制中心已就绪)...")
     application.run_polling()
 
 if __name__ == '__main__':
     main()
-
-
-
-
