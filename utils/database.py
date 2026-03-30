@@ -26,7 +26,11 @@ class UserManager:
             "bot_active": True, 
             "plugins": {}, 
             "use_proxy": True,    # 默认开启代理
-            "proxies": []         # 代理列表
+            "proxies": [],        # 代理列表
+            "proxy_api": {        # 新增：代理 API 配置
+                "api_id": "",
+                "api_akey": ""
+            }
         }
         
         if not os.path.exists(self.FILE_PATH):
@@ -35,11 +39,10 @@ class UserManager:
         try:
             with open(self.FILE_PATH, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-                # 确保 config 存在
                 if "config" not in data:
                     data["config"] = default_config
                 
-                # 补全缺失的字段 (向后兼容)
+                # 补全缺失的字段
                 for key, val in default_config.items():
                     if key not in data["config"]:
                         data["config"][key] = val
@@ -119,7 +122,7 @@ class UserManager:
         self._save()
         return not current
 
-    # === 代理管理 ===
+    # === 代理池管理 ===
     def get_proxies(self):
         return self.data["config"].get("proxies", [])
 
@@ -129,7 +132,6 @@ class UserManager:
 
     def add_proxies(self, new_proxies):
         current = self.data["config"].get("proxies", [])
-        # 去重添加
         for p in new_proxies:
             if p not in current:
                 current.append(p)
@@ -138,6 +140,17 @@ class UserManager:
 
     def clear_proxies(self):
         self.data["config"]["proxies"] = []
+        self._save()
+
+    # === 代理 API 管理 (新增) ===
+    def get_proxy_api(self):
+        return self.data["config"].get("proxy_api", {"api_id": "", "api_akey": ""})
+
+    def set_proxy_api(self, api_id, api_akey):
+        self.data["config"]["proxy_api"] = {
+            "api_id": api_id,
+            "api_akey": api_akey
+        }
         self._save()
 
 user_manager = UserManager()
