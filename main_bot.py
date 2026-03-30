@@ -16,7 +16,8 @@ from plugins import jetfi
 from plugins import travelgoogoo
 from plugins import rbesim
 from plugins import kitesim
-from plugins import ivideo  # <--- 新增 iVideo 插件导入
+from plugins import ivideo
+from plugins import nomad
 
 # 配置日志
 logging.basicConfig(
@@ -51,6 +52,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     jetfi_status = user_manager.get_plugin_status("jetfi") 
     rbesim_status = user_manager.get_plugin_status("rbesim")
     kitesim_status = user_manager.get_plugin_status("kitesim")
+    nomad_status = user_manager.get_plugin_status("nomad")
     ivideo_status = user_manager.get_plugin_status("ivideo") # <--- 新增状态检查
 
     text = (
@@ -71,12 +73,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         rbesim_btn_text = "📡 RB eSIM 提取" if rbesim_status else "📡 RB eSIM (维护中)" 
         kitesim_btn_text = "🪁 Kite eSIM 爆破" if kitesim_status else "🪁 Kite eSIM (维护中)"
         ivideo_btn_text = "📹 iVideo 0元下单" if ivideo_status else "📹 iVideo (维护中)" # <--- 新增按钮文本
+        nomad_btn_text = "nomad 试用下单" if ivideo_status else "nomad (维护中)"
 
         keyboard.append([InlineKeyboardButton(yanci_btn_text, callback_data="plugin_yanci_entry")])
         keyboard.append([InlineKeyboardButton(flexi_btn_text, callback_data="plugin_flexi_entry")])
         keyboard.append([InlineKeyboardButton(jetfi_btn_text, callback_data="plugin_jetfi_entry")])
         keyboard.append([InlineKeyboardButton(rbesim_btn_text, callback_data="plugin_rbesim_entry")])
-        keyboard.append([InlineKeyboardButton(kitesim_btn_text, callback_data="plugin_kitesim_entry")]) 
+        keyboard.append([InlineKeyboardButton(kitesim_btn_text, callback_data="plugin_kitesim_entry")])
+        keyboard.append([InlineKeyboardButton(nomad_btn_text, callback_data="plugin_nomad_entry")])
         keyboard.append([InlineKeyboardButton(ivideo_btn_text, callback_data="plugin_ivideo_entry")]) # <--- 新增按钮
         keyboard.append([InlineKeyboardButton("🏝 TravelGooGoo 扫码", callback_data="plugin_travel_entry")])
     else:
@@ -164,6 +168,7 @@ async def main_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         j_status = user_manager.get_plugin_status("jetfi") 
         r_status = user_manager.get_plugin_status("rbesim")
         k_status = user_manager.get_plugin_status("kitesim")
+        k_status = user_manager.get_plugin_status("nomad")
         i_status = user_manager.get_plugin_status("ivideo") # <--- 新增状态
         
         text = "🔧 **项目运行状态控制**\n点击按钮切换 开启/关闭 状态。"
@@ -173,6 +178,7 @@ async def main_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton(f"JetFi: {'🟢 开启' if j_status else '🔴 关闭'}", callback_data="admin_toggle_jetfi")],
             [InlineKeyboardButton(f"RB eSIM: {'🟢 开启' if r_status else '🔴 关闭'}", callback_data="admin_toggle_rbesim")],
             [InlineKeyboardButton(f"Kite eSIM: {'🟢 开启' if k_status else '🔴 关闭'}", callback_data="admin_toggle_kitesim")],
+            [InlineKeyboardButton(f"nomad eSIM: {'🟢 开启' if k_status else '🔴 关闭'}", callback_data="admin_toggle_nomad")],
             [InlineKeyboardButton(f"iVideo: {'🟢 开启' if i_status else '🔴 关闭'}", callback_data="admin_toggle_ivideo")], # <--- 新增控制按钮
             [InlineKeyboardButton("🔙 返回上级", callback_data="admin_menu_main")]
         ]
@@ -294,6 +300,7 @@ def main():
     travelgoogoo.register_handlers(application)
     rbesim.register_handlers(application)
     kitesim.register_handlers(application)
+    nomad.register_handlers(application)
     ivideo.register_handlers(application)  # <--- 新增 iVideo 处理器注册
 
     print("✅ 机器人已启动 (聚合控制中心已就绪)...")
