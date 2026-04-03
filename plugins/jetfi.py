@@ -7,6 +7,7 @@ import random
 import string
 import asyncio
 import traceback
+import hashlib
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, CallbackQueryHandler
 
@@ -38,6 +39,11 @@ class JetFiLogic:
         return f"{user}@{random.choice(domains)}"
 
     @staticmethod
+    def generate_android_id():
+        """根据逆向结果，生成 16 位小写十六进制的 Android ID"""
+        return ''.join(random.choices('0123456789abcdef', k=16))
+
+    @staticmethod
     def get_session():
         # 使用框架提供的代理 session，自动处理代理轮换
         session = get_safe_session(test_url="https://esim.jetfimobile.com", timeout=10)
@@ -47,12 +53,32 @@ class JetFiLogic:
     @staticmethod
     def api_request(session, url, data):
         try:
-            # 这里的 session 已经是配置好代理的了
-            resp = session.post(url, json=data, timeout=15)
+            req_headers = session.headers.copy()
+            
+            # 1. 修复登录态传递：原味赋值 + 移除双引号
+            if "Authorization" in session.headers:
+                token_val = session.headers["Authorization"]
+                req_headers["Authorization"] = token_val
+                req_headers["token"] = token_val.replace('"', '')
+
+            # 2. 模拟原生拦截器生成 signature 头
+            # 使用紧凑模式生成 JSON 字符串，对齐 Java OkHttp 的行为
+            body_str = json.dumps(data, separators=(',', ':'))
+            
+            # 对原始 RequestBody 字符串进行无盐 Hash (MD5)
+            signature = hashlib.md5(body_str.encode('utf-8')).hexdigest()
+            req_headers["signature"] = signature
+
+            # 3. 务必直接发送 body_str，确保服务端计算 Hash 的原文与我们发送的完全一致
+            resp = session.post(url, data=body_str.encode('utf-8'), headers=req_headers, timeout=15)
+            
             if not resp.ok:
+                logger.error(f"[JetFi] 请求失败 HTTP {resp.status_code}: {resp.text}")
                 return {"code": -1, "message": f"HTTP {resp.status_code}"}
+            
             return resp.json()
         except Exception as e:
+            logger.error(f"[JetFi] API请求异常: {traceback.format_exc()}")
             return {"code": -1, "message": str(e)}
 
     @staticmethod
@@ -61,11 +87,12 @@ class JetFiLogic:
         plan_info = PLAN_MAP.get(plan_key)
         
         email = JetFiLogic.generate_random_email()
-        device_id = str(uuid.uuid4()).upper()
+        # 使用逆向得出的真实 Android ID 格式
+        device_id = JetFiLogic.generate_android_id()
         password = "qingziqing11111"
         
         # 1. 注册
-        logger.info(f"[JetFi] 正在注册: {email}")
+        logger.info(f"[JetFi] 正在注册: {email} | DeviceID: {device_id}")
         reg_res = JetFiLogic.api_request(session, "https://esim.jetfimobile.com/apis/api/v1/member/register", {
             "email": email, "password": password, "platform": 1, "channelCode": "", "uniqueDeviceId": device_id
         })
@@ -84,8 +111,8 @@ class JetFiLogic:
         if not token:
             return False, "登录失败: 未获取到 Token"
         
-        # 更新 Header 带上 Token
-        session.headers.update({"Authorization": f"Bearer {token}"})
+        # ⚠️ 关键修复：不再拼接 "Bearer "，直接存入原生 Token
+        session.headers.update({"Authorization": token})
 
         # 3. 获取优惠券
         coupon_res = JetFiLogic.api_request(session, "https://esim.jetfimobile.com/apis/api/v1/member/coupon/query", {
@@ -221,4 +248,4 @@ async def run_jetfi_task(message, context, plan_key):
 def register_handlers(application):
     application.add_handler(CallbackQueryHandler(jetfi_callback, pattern="^jetfi_.*"))
     application.add_handler(CallbackQueryHandler(jetfi_menu, pattern="^plugin_jetfi_entry$"))
-    print("🔌 JetFi (Qingzi) 插件已加载")
+    print("🔌 JetFi (Qingzi - 完美伪装版) 插件已加载")
