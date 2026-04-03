@@ -22,10 +22,14 @@ PLAN_MAP = {
     "cn": {"orderComment": "凤鸾春恩车皇宫巡游1天", "dataPlanId": 10006}
 }
 
+# 使用真实抓包中的 Android WebView 专属伪装头
 COMMON_HEADERS = {
-    "User-Agent": "JetFi mobile/102 CFNetwork/1410.0.3 Darwin/22.6.0",
+    "User-Agent": "Mozilla/5.0 (Linux; Android 13; T508N Build/TP1A.220624.014; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/101.0.4951.61 Mobile Safari/537.36",
     "Content-Type": "application/json",
-    "Accept-Language": "zh-CN,zh-Hans;q=0.9"
+    "Accept-Language": "zh-Hant-TW",
+    "X-Requested-With": "com.jetfi.wifiesim",
+    "Origin": "https://esim.jetfimobile.com",
+    "Referer": "https://esim.jetfimobile.com/promo-code?entry=MEMBER"
 }
 
 # ================= 业务逻辑类 =================
@@ -55,11 +59,17 @@ class JetFiLogic:
         try:
             req_headers = session.headers.copy()
             
-            # 1. 修复登录态传递：原味赋值 + 移除双引号
+            # 1. 修复登录态传递：H5 接口需要带上 Bearer 
             if "Authorization" in session.headers:
                 token_val = session.headers["Authorization"]
-                req_headers["Authorization"] = token_val
-                req_headers["token"] = token_val.replace('"', '')
+                # 检查是否已经包含了 Bearer (原生的不需要，但 H5 查券接口抓包显示有 Bearer)
+                if not token_val.startswith("Bearer "):
+                    req_headers["Authorization"] = f"Bearer {token_val}"
+                else:
+                    req_headers["Authorization"] = token_val
+                
+                # 同时保留去除双引号的 token 头，以防后端强校验
+                req_headers["token"] = token_val.replace('"', '').replace('Bearer ', '')
 
             # 2. 模拟原生拦截器生成 signature 头
             # 使用紧凑模式生成 JSON 字符串，对齐 Java OkHttp 的行为
@@ -111,17 +121,25 @@ class JetFiLogic:
         if not token:
             return False, "登录失败: 未获取到 Token"
         
-        # ⚠️ 关键修复：不再拼接 "Bearer "，直接存入原生 Token
+        # 将基础 Token 存入 session，api_request 中会自动处理 Bearer
         session.headers.update({"Authorization": token})
 
-        # 3. 获取优惠券
-        coupon_res = JetFiLogic.api_request(session, "https://esim.jetfimobile.com/apis/api/v1/member/coupon/query", {
-            "entry": "EXCHANGE", "platform": 1, "pageParam": {"pageNum": 1, "pageSize": 100}, "language": "zh-Hant-TW"
-        })
+        # 3. 获取优惠券 (核心修复点: entry 为 MEMBER)
+        coupon_payload = {
+            "entry": "MEMBER",
+            "platform": 1, 
+            "pageParam": {"pageNum": 1, "pageSize": 100}, 
+            "language": "zh-Hant-TW"
+        }
+        coupon_res = JetFiLogic.api_request(session, "https://esim.jetfimobile.com/apis/api/v1/member/coupon/query", coupon_payload)
+        
         valid_coupons = coupon_res.get("data", {}).get("validCoupons", [])
         if not valid_coupons:
-            return False, "无法以优惠价格下单 (无优惠券)"
+            logger.warning(f"查券失败, 接口返回: {coupon_res}")
+            return False, "无法以优惠价格下单 (无新人券, 请检查风控/代理IP)"
+        
         promo_code = valid_coupons[0]["promoCode"]
+        logger.info(f"成功获取到优惠券码: {promo_code}")
 
         # 4. 创建订单
         order_payload = {
@@ -248,4 +266,4 @@ async def run_jetfi_task(message, context, plan_key):
 def register_handlers(application):
     application.add_handler(CallbackQueryHandler(jetfi_callback, pattern="^jetfi_.*"))
     application.add_handler(CallbackQueryHandler(jetfi_menu, pattern="^plugin_jetfi_entry$"))
-    print("🔌 JetFi (Qingzi - 完美伪装版) 插件已加载")
+    print("🔌 JetFi (H5 WebView 完美伪装版) 插件已加载")
