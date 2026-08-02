@@ -63,192 +63,28 @@ GROUP_LINK = "REPLACE_GROUP_LINK"
 bot = telebot.TeleBot(BOT_TOKEN)
 
 # ================= 内存状态管理 =================
+PROXY_FILE = "proxies.txt"
 sys_state = {
     "is_active": True,
     "banned_users": set(),
     "proxies": [] 
 }
 
-# ================= 底层 Crypto 引擎与 NomadBot =================
-def get_crypto_param(p1, p2, p3, p4):
-    combined = p1 + p2 + p3 + p4
-    combined += "=" * ((4 - len(combined) % 4) % 4)
-    first_decode_bytes = base64.b64decode(combined)
-    padding_len = (4 - len(first_decode_bytes) % 4) % 4
-    first_decode_bytes += b"=" * padding_len
-    return base64.b64decode(first_decode_bytes)
+# 启动时自动读取本地保存的代理配置
+if os.path.exists(PROXY_FILE):
+    with open(PROXY_FILE, "r", encoding="utf-8") as f:
+        sys_state["proxies"] = [line.strip() for line in f if line.strip()]
 
-FINAL_AES_KEY = get_crypto_param("TURVeVl6", "TTRNell5", "TXpGak5", "ETXpNZw")
-FINAL_AES_IV  = get_crypto_param("WVRWa1lq", "RXpORGM1", "T1dNeFlt", "RTFZdw")
-
-FIRST_NAMES = ["James", "Mary", "John", "Patricia", "Robert", "Jennifer", "Michael", "Linda"]
-LAST_NAMES = ["Smith", "Johnson", "Williams", "Brown", "Jones", "Garcia", "Miller", "Davis"]
-DEVICE_PROFILES = [
-    "Samsung,SM-S918B,Android 14",
-    "Google,Pixel 7 Pro,Android 13",
-    "Xiaomi,2210132G,Android 13",
-    "OnePlus,LE2120,Android 12"
-]
-
-class NomadBot:
-    def __init__(self, proxy=None):
-        self.base_url = "https://api.getnomad.app"
-        self.session = requests.Session()
-        
-        if proxy:
-            self.session.proxies = {"http": proxy, "https": proxy}
-            print(f"[*] 已挂载 SOCKS5 代理: {proxy}")
-            
-        self.device_id = str(uuid.uuid4())
-        self.device_info = random.choice(DEVICE_PROFILES)
-        
-        self.session.headers.update({
-            "Host": "api.getnomad.app",
-            "Accept-Language": "zh-Hans",
-            "x-app-ver": "10.8.1",
-            "x-device-info": self.device_info, 
-            "x-request-source": "android",
-            "x-channel-id": "nomad-android",
-            "User-Agent": "Ktor client",
-            "Content-Type": "application/json",
-            "Accept": "application/json,application/json",
-            "Connection": "Keep-Alive"
-        })
-
-    def _get_security_headers(self):
-        payload = {
-            "timestamp": int(time.time()),
-            "token": str(uuid.uuid4()),
-            "x-device-token": self.device_id
-        }
-        json_bytes = json.dumps(payload, separators=(',', ':')).encode('utf-8')
-        page_token = hmac.new(FINAL_AES_KEY, json_bytes, hashlib.sha256).hexdigest()
-        cipher = AES.new(FINAL_AES_KEY, AES.MODE_CBC, FINAL_AES_IV)
-        padded_data = pad(json_bytes, AES.block_size, style='pkcs7')
-        app_tag = base64.b64encode(cipher.encrypt(padded_data)).decode('utf-8')
-        return {
-            "x-page-token": page_token,
-            "x-app-tag": app_tag,
-            "x-device-token": self.device_id
-        }
-
-    def generate_identity(self, email):
-        first_name = random.choice(FIRST_NAMES)
-        last_name = random.choice(LAST_NAMES)
-        password = "Nomad" + ''.join(random.choices(string.digits, k=4)) + "A1!" 
-        return {"email": email, "password": password, "first_name": first_name, "last_name": last_name}
-
-    def step1_request_otp(self, user):
-        url = f"{self.base_url}/account/api/v3/user/get_verification_code"
-        payload = {"email": user['email'], "validation_case": "sign_up"}
-        headers = self.session.headers.copy()
-        headers.update(self._get_security_headers())
-        resp = self.session.post(url, json=payload, headers=headers, verify=False)
-        if resp.status_code == 200:
-            return "otp_sent"
-        try:
-            err = resp.json()
-            if err.get("code") == 2002:
-                return self._sign_in(user['email'], user['password'])
-        except: pass
-        return False
-
-    def _sign_in(self, email, password):
-        url = f"{self.base_url}/account/api/v3/user/sign_in"
-        payload = {"email": email, "password": password}
-        headers = self.session.headers.copy()
-        headers.update(self._get_security_headers())
-        resp = self.session.post(url, json=payload, headers=headers, verify=False)
-        if resp.status_code == 200:
-            token = resp.json().get("data", {}).get("access_token")
-            if token:
-                self.session.headers.update({"Authorization": f"Bearer {token}"})
-                return "signed_in"
-        return False
-
-    def step2_check_otp(self, email, code):
-        url = f"{self.base_url}/account/api/v3/user/check_verification_code"
-        payload = {"email": email, "code": code}
-        headers = self.session.headers.copy()
-        headers.update(self._get_security_headers())
-        resp = self.session.post(url, json=payload, headers=headers, verify=False)
-        return resp.status_code == 200
-
-    def step3_sign_up(self, user, code):
-        url = f"{self.base_url}/account/api/v3/user/sign_up"
-        payload = {
-            "email": user['email'], "password": user['password'],
-            "verification_code": code, "first_name": user['first_name'],
-            "last_name": user['last_name'], "subscribe_to_feed": True
-        }
-        headers = self.session.headers.copy()
-        headers.update(self._get_security_headers())
-        resp = self.session.post(url, json=payload, headers=headers, verify=False)
-        if resp.status_code == 200:
-            token = resp.json().get("data", {}).get("access_token")
-            if token:
-                self.session.headers.update({"Authorization": f"Bearer {token}"})
-                return True
-        return False
-
-    def step3_5_get_trial_plans(self):
-        url = f"{self.base_url}/product/api/v3/trial/get_trial_plan_info"
-        headers = self.session.headers.copy()
-        headers.update(self._get_security_headers())
-        resp = self.session.post(url, json={}, headers=headers, verify=False)
-        if resp.status_code != 200: return None
-        plans = resp.json().get("data", {}).get("trial_plans")
-        if not plans: return None
-        offers = []
-        for p in plans:
-            code = p.get("country_code") or p.get("region_code", "??")
-            plan = p.get("plan", {})
-            offers.append({
-                "code": code,
-                "offer_id": plan.get("id", ""),
-                "name": plan.get("product", {}).get("name", code)
-            })
-        return offers
-
-    def step4_create_order(self, offer_id, coverage):
-        url = f"{self.base_url}/order/api/v3/order/create_master_order"
-        payload = {
-            "offered_products": [{"offered_id": offer_id, "quantity": 1, "coverage": coverage}],
-            "currency": "USD", "discount": {},
-            "device": {"type": "Android", "id": self.device_id}
-        }
-        headers = self.session.headers.copy()
-        headers.update(self._get_security_headers())
-        resp = self.session.post(url, json=payload, headers=headers, verify=False)
-        if resp.status_code == 202:
-            return resp.json().get("data", {}).get("master_order_id")
-        return None
-
-    def step5_get_esim_details(self, master_id):
-        url = f"{self.base_url}/order/api/v3/order/get_master_orders"
-        payload = {"master_order_ids": [master_id], "product_categories": ["esim"]}
-        headers = self.session.headers.copy()
-        headers.update(self._get_security_headers())
-        resp = self.session.post(url, json=payload, headers=headers, verify=False)
-        if resp.status_code == 200:
-            try:
-                orders = resp.json()['data']['master_orders'][0]['orders'][0]
-                esim = orders['esim_info']
-                return {
-                    'plan_name': orders['plan_info']['name'],
-                    'iccid': esim['iccid'],
-                    'qr_data': esim['qr_data'],
-                    'smdp_url': esim['smdp_url']
-                }
-            except: pass
-        return None
+# ================= 底层 Crypto 引擎与 NomadBot (保持原有缩进) =================
+# ... (保留您原来的 get_crypto_param 和 NomadBot 类定义，这部分不需要改动) ...
 
 # ================= 中间件与权限校验 =================
 def is_user_banned(user_id):
-    return user_id in sys_state["banned_users"]
+    return int(user_id) in sys_state["banned_users"]
 
 def check_group_membership(user_id):
-    if user_id == ADMIN_ID or str(REQUIRED_GROUP_ID) == "0":
+    # 修复 ID 对比漏洞：强制统一转换为字符串对比
+    if str(user_id) == str(ADMIN_ID) or str(REQUIRED_GROUP_ID) == "0":
         return True
     try:
         chat_member = bot.get_chat_member(REQUIRED_GROUP_ID, user_id)
@@ -263,7 +99,7 @@ def send_welcome(message):
     user_id = message.from_user.id
     if is_user_banned(user_id):
         return bot.send_message(user_id, "❌ 您已被管理员封禁。")
-    if not sys_state["is_active"] and user_id != ADMIN_ID:
+    if not sys_state["is_active"] and str(user_id) != str(ADMIN_ID):
         return bot.send_message(user_id, "🔧 系统维护中，暂时关闭服务。")
     if not check_group_membership(user_id):
         markup = InlineKeyboardMarkup()
@@ -271,99 +107,129 @@ def send_welcome(message):
         markup.add(InlineKeyboardButton("🔄 我已加入，刷新状态", callback_data="check_join"))
         bot.send_message(user_id, "⚠️ **使用限制**\n您必须先加入我们的官方群组才能使用此机器人！", parse_mode="Markdown", reply_markup=markup)
         return
+        
     markup = InlineKeyboardMarkup()
     markup.row(InlineKeyboardButton("🚀 提取 eSIM", callback_data="start_esim"))
+    
+    # 修复：直接向管理员展示配置面板气泡接口
+    if str(user_id) == str(ADMIN_ID):
+        markup.row(InlineKeyboardButton("⚙️ 管理员控制面板 (代理/封禁)", callback_data="open_admin_panel"))
+        
     bot.send_message(user_id, "👋 欢迎使用 Nomad eSIM 助手！", reply_markup=markup)
 
 @bot.message_handler(commands=['admin'])
 def admin_panel(message):
-    if message.from_user.id != ADMIN_ID: return
+    if str(message.from_user.id) != str(ADMIN_ID): 
+        return
     markup = InlineKeyboardMarkup()
-    status_text = "🟢 当前状态：运行中 (点击关闭)" if sys_state["is_active"] else "🔴 当前状态：已关闭 (点击开启)"
+    status_text = "🟢 运行中 (点击维护)" if sys_state["is_active"] else "🔴 维护中 (点击开启)"
     markup.row(InlineKeyboardButton(status_text, callback_data="admin_toggle_status"))
-    markup.row(InlineKeyboardButton("🚫 封禁用户", callback_data="admin_ban"), InlineKeyboardButton("🔓 解封用户", callback_data="admin_unban"))
-    markup.row(InlineKeyboardButton("🌐 添加 Socks5 代理", callback_data="admin_add_proxy"), InlineKeyboardButton("🗑️ 清空代理池", callback_data="admin_clear_proxy"))
-    bot.send_message(message.chat.id, f"👨‍💻 **超级管理员面板**\n\n当前代理池数量: {len(sys_state['proxies'])}", parse_mode="Markdown", reply_markup=markup)
+    markup.row(InlineKeyboardButton("🚫 封禁用户", callback_data="admin_ban"), 
+               InlineKeyboardButton("🔓 解封用户", callback_data="admin_unban"))
+    markup.row(InlineKeyboardButton("🌐 添加代理配置", callback_data="admin_add_proxy"), 
+               InlineKeyboardButton("🗑️ 清空代理", callback_data="admin_clear_proxy"))
+    
+    msg_text = f"👨‍💻 **超级管理员面板**\n\n当前有效代理节点数量: `{len(sys_state['proxies'])}`\n建议添加格式: `socks5://user:pass@ip:port`"
+    bot.send_message(message.chat.id, msg_text, parse_mode="Markdown", reply_markup=markup)
 
 @bot.callback_query_handler(func=lambda call: True)
 def handle_callback_query(call):
     user_id = call.from_user.id
+    
     if call.data == "check_join":
         if check_group_membership(user_id):
             bot.answer_callback_query(call.id, "✅ 验证通过！")
             send_welcome(call.message)
         else:
             bot.answer_callback_query(call.id, "❌ 您还未加入群组！", show_alert=True)
+            
     elif call.data == "start_esim":
         msg = bot.send_message(user_id, "📝 请回复您的测试邮箱地址：")
         bot.register_next_step_handler(msg, process_email_step)
-    elif call.data == "admin_toggle_status" and user_id == ADMIN_ID:
+        
+    # 管理员相关回调校验，统一转 String 判断
+    elif call.data == "open_admin_panel" and str(user_id) == str(ADMIN_ID):
+        bot.answer_callback_query(call.id)
+        admin_panel(call.message)
+        
+    elif call.data == "admin_toggle_status" and str(user_id) == str(ADMIN_ID):
         sys_state["is_active"] = not sys_state["is_active"]
         bot.answer_callback_query(call.id, "状态已切换")
         admin_panel(call.message)
-    elif call.data == "admin_ban" and user_id == ADMIN_ID:
+        
+    elif call.data == "admin_ban" and str(user_id) == str(ADMIN_ID):
         msg = bot.send_message(user_id, "请输入要封禁的用户ID:")
         bot.register_next_step_handler(msg, lambda m: sys_state["banned_users"].add(int(m.text.strip())) or bot.send_message(user_id, f"✅ 已封禁 {m.text}"))
-    elif call.data == "admin_unban" and user_id == ADMIN_ID:
+        
+    elif call.data == "admin_unban" and str(user_id) == str(ADMIN_ID):
         msg = bot.send_message(user_id, "请输入要解封的用户ID:")
         bot.register_next_step_handler(msg, lambda m: sys_state["banned_users"].discard(int(m.text.strip())) or bot.send_message(user_id, f"✅ 已解封 {m.text}"))
-    elif call.data == "admin_add_proxy" and user_id == ADMIN_ID:
-        msg = bot.send_message(user_id, "请输入代理 (如 socks5://user:pass@ip:port):")
+        
+    elif call.data == "admin_add_proxy" and str(user_id) == str(ADMIN_ID):
+        msg = bot.send_message(user_id, "请输入 SOCKS5 代理 (例如: socks5://user:pass@ip:port):")
         bot.register_next_step_handler(msg, add_proxy_step)
-    elif call.data == "admin_clear_proxy" and user_id == ADMIN_ID:
+        
+    elif call.data == "admin_clear_proxy" and str(user_id) == str(ADMIN_ID):
         sys_state["proxies"] = []
+        if os.path.exists(PROXY_FILE):
+            os.remove(PROXY_FILE)
         bot.answer_callback_query(call.id, "✅ 代理池已清空", show_alert=True)
 
 def add_proxy_step(message):
-    sys_state["proxies"].append(message.text.strip())
-    bot.send_message(message.chat.id, f"✅ 添加成功。当前代理池容量: {len(sys_state['proxies'])}")
+    new_proxy = message.text.strip()
+    if new_proxy not in sys_state["proxies"]:
+        sys_state["proxies"].append(new_proxy)
+        # 修复：写入到文件，实现重启不丢失
+        with open(PROXY_FILE, "a", encoding="utf-8") as f:
+            f.write(new_proxy + "\n")
+    bot.send_message(message.chat.id, f"✅ 配置成功！当前代理池总计容量: {len(sys_state['proxies'])}")
 
 def process_email_step(message):
     email = message.text.strip()
     if not sys_state["proxies"]:
-        bot.send_message(message.chat.id, "❌ 错误：管理员尚未配置 SOCKS5 代理。为防风控，操作中止。")
+        bot.send_message(message.chat.id, "❌ 错误：管理员尚未配置 SOCKS5 代理节点。为防服务器 IP 被风控，操作中止。请管理员点击主菜单【⚙️ 管理员控制面板】添加。")
         return
     current_proxy = random.choice(sys_state["proxies"])
-    bot.send_message(message.chat.id, f"🛡️ 正在通过隧道建立连接...")
+    bot.send_message(message.chat.id, f"🛡️ 正在通过加密隧道节点建立连接...")
     
     nomad_bot = NomadBot(proxy=current_proxy)
-    bot.send_message(message.chat.id, "⏳ 正在发送验证码...")
+    bot.send_message(message.chat.id, "⏳ 正在生成环境特征并发起请求...")
     
     user = nomad_bot.generate_identity(email=email)
     result = nomad_bot.step1_request_otp(user)
     
     if result == "otp_sent":
-        msg = bot.send_message(message.chat.id, "✅ 验证码已发送，请回复收到的验证码：")
+        msg = bot.send_message(message.chat.id, "✅ 验证码已发送，请直接回复您收到的验证码：")
         bot.register_next_step_handler(msg, process_otp_step, nomad_bot, user)
     else:
-        bot.send_message(message.chat.id, "❌ 发送失败，账号可能受限或网络异常。")
+        bot.send_message(message.chat.id, "❌ 发送失败，目标邮箱或网络节点受限。")
 
 def process_otp_step(message, nomad_bot, user):
     code = message.text.strip()
-    bot.send_message(message.chat.id, "⏳ 正在校验并自动申请首个可用0元套餐...")
+    bot.send_message(message.chat.id, "⏳ 正在校验并在后台静默申请首个可用 0 元套餐...")
     
     if nomad_bot.step2_check_otp(user['email'], code) and nomad_bot.step3_sign_up(user, code):
         plans = nomad_bot.step3_5_get_trial_plans()
         if not plans:
-            return bot.send_message(message.chat.id, "❌ 未获取到可用试用套餐。")
+            return bot.send_message(message.chat.id, "❌ 该账户未能获取到可用的试用套餐。")
         
         plan = plans[0]
-        bot.send_message(message.chat.id, f"✅ 注册成功！\n🌍 正在为您申请: {plan['name']}")
+        bot.send_message(message.chat.id, f"✅ 登录成功！\n🌍 正在为您配置网络文件: {plan['name']}")
         
         master_id = nomad_bot.step4_create_order(plan['offer_id'], plan['code'])
         if master_id:
-            bot.send_message(message.chat.id, "🔄 订单处理中，等待5秒提取 eSIM...")
+            bot.send_message(message.chat.id, "🔄 后台派发中，请等待约 5 秒钟...")
             time.sleep(5)
             esim_info = nomad_bot.step5_get_esim_details(master_id)
             if esim_info:
-                msg = f"🎉 **eSIM 提取成功！**\n\n🌍 套餐: `{esim_info['plan_name']}`\n📍 ICCID: `{esim_info['iccid']}`\n🔗 LPA: `{esim_info['qr_data']}`\n🌐 SM-DP+: `{esim_info['smdp_url']}`"
+                msg = f"🎉 **提取大成功！**\n\n🌍 目标套餐: `{esim_info['plan_name']}`\n📍 硬件串号 (ICCID): `{esim_info['iccid']}`\n🔗 LPA 激活码: `{esim_info['qr_data']}`\n🌐 接入服务器: `{esim_info['smdp_url']}`"
                 bot.send_message(message.chat.id, msg, parse_mode="Markdown")
             else:
-                bot.send_message(message.chat.id, "❌ 获取安装信息失败。")
+                bot.send_message(message.chat.id, "❌ 创建已通过，但解析安装数据失败。")
         else:
-            bot.send_message(message.chat.id, "❌ 订单创建失败。")
+            bot.send_message(message.chat.id, "❌ 创建订单环节被阻拦，请检查节点质量。")
     else:
-        bot.send_message(message.chat.id, "❌ 验证码校验失败或注册异常。")
+        bot.send_message(message.chat.id, "❌ 校验未能通过或注册流程中断。")
 
 if __name__ == '__main__':
     print("Bot is starting...")
