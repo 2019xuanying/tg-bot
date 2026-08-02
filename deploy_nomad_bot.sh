@@ -1,6 +1,6 @@
 #!/bin/bash
 # ========================================================
-# Nomad Telegram Bot 一键部署脚本 (集成 ipdeep 动态代理 & 多国套餐自选)
+# Nomad Telegram Bot 一键部署脚本 (完美修复接口路径 & 动态代理 & 多国自选)
 # ========================================================
 
 # 颜色输出
@@ -9,7 +9,7 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-echo -e "${GREEN}>>> 欢迎使用 Nomad Bot 优化部署脚本 <<<${NC}"
+echo -e "${GREEN}>>> 欢迎使用 Nomad Bot 修复版部署脚本 <<<${NC}"
 
 # 获取配置信息
 read -p "请输入您的 Telegram Bot Token: " BOT_TOKEN
@@ -208,31 +208,37 @@ class NomadBot:
                 return True
         return False
 
+    # 【已修复】采用正确的最新 Nomad 接口路径拉取套餐列表
     def step3_5_get_trial_plans(self):
-        url = f"{self.base_url}/product/api/v3/trial/get_trial_plan_info"
+        url = f"{self.base_url}/shop/api/v3/store/trial_plan/list"
         headers = self.session.headers.copy()
         headers.update(self._get_security_headers())
-        resp = self.session.post(url, json={}, headers=headers, verify=False)
-        if resp.status_code != 200: 
+        try:
+            resp = self.session.post(url, json={}, headers=headers, verify=False)
+            if resp.status_code != 200: 
+                return None
+            data = resp.json().get("data", {})
+            plans = data.get("trial_plans")
+            if not plans: 
+                return None
+            
+            offers = []
+            for p in plans:
+                code = p.get("country_code") or p.get("region_code", "??")
+                plan = p.get("plan", {})
+                product = plan.get("product", {})
+                svc = product.get("service", {}).get("data", {})
+                offers.append({
+                    "code": code,
+                    "offer_id": plan.get("id", ""),
+                    "name": product.get("name", code),
+                    "data": f"{svc.get('amount', '?')}{svc.get('amount_unit', 'GB')}",
+                    "price_usd": plan.get("price", {}).get("USD", {}).get("amount", "0")
+                })
+            return offers
+        except Exception as e:
+            print(f"[-] 获取套餐异常: {e}")
             return None
-        plans = resp.json().get("data", {}).get("trial_plans")
-        if not plans: 
-            return None
-        
-        offers = []
-        for p in plans:
-            code = p.get("country_code") or p.get("region_code", "??")
-            plan = p.get("plan", {})
-            product = plan.get("product", {})
-            svc = product.get("service", {}).get("data", {})
-            offers.append({
-                "code": code,
-                "offer_id": plan.get("id", ""),
-                "name": product.get("name", code),
-                "data": f"{svc.get('amount', '?')}{svc.get('amount_unit', 'GB')}",
-                "price_usd": plan.get("price", {}).get("USD", {}).get("amount", "0")
-            })
-        return offers
 
     def step4_create_order(self, offer_id, coverage):
         url = f"{self.base_url}/order/api/v3/order/create_master_order"
@@ -373,7 +379,6 @@ def handle_callback_query(call):
             parse_mode="Markdown"
         )
 
-        # 寻找对应的 coverage (country code)
         coverage = client.temp_plans_map.get(offer_id, "US")
         master_id = client.step4_create_order(offer_id, coverage)
         
@@ -430,7 +435,6 @@ def process_otp_step(message):
     user = nomad_bot.temp_user
     is_success = False
     
-    # 检查是否直接走登录或者需要校验验证码并注册
     if nomad_bot.session.headers.get("Authorization"):
         is_success = True
     else:
@@ -444,10 +448,8 @@ def process_otp_step(message):
         if not plans:
             return bot.send_message(message.chat.id, "❌ 未获取到可用试用套餐。")
         
-        # 缓存映射，方便点击回调时取 coverage
         nomad_bot.temp_plans_map = {p['offer_id']: p['code'] for p in plans}
         
-        # 动态构建国家/套餐内联按钮键盘
         markup = InlineKeyboardMarkup()
         for p in plans:
             btn_text = f"{p['code']} | {p['name']} ({p['data']} / ${p['price_usd']})"
