@@ -1,6 +1,6 @@
 #!/bin/bash
 # ========================================================
-# Nomad Telegram Bot 一键部署脚本 (集成 ipdeep 动态代理)
+# Nomad Telegram Bot 一键部署脚本 (集成 ipdeep 动态代理 & 多国套餐自选)
 # ========================================================
 
 # 颜色输出
@@ -9,7 +9,7 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-echo -e "${GREEN}>>> 欢迎使用 Nomad Bot 一键部署脚本 <<<${NC}"
+echo -e "${GREEN}>>> 欢迎使用 Nomad Bot 优化部署脚本 <<<${NC}"
 
 # 获取配置信息
 read -p "请输入您的 Telegram Bot Token: " BOT_TOKEN
@@ -65,7 +65,8 @@ bot = telebot.TeleBot(BOT_TOKEN)
 # ================= 内存状态管理 =================
 sys_state = {
     "is_active": True,
-    "banned_users": set()
+    "banned_users": set(),
+    "active_sessions": {} # user_id -> NomadBot instance
 }
 
 # ================= 动态代理 API 拉取逻辑 =================
@@ -73,21 +74,11 @@ def fetch_dynamic_proxy():
     api_url = "https://api.ipdeep.com/api/Pro/DynamicIp/GetIpByGenerateLink?id=1107NmExMzI2NjcxMDIwOTA0MDIyMDk0"
     try:
         resp = requests.get(api_url, timeout=10)
-        raw_text = resp.text.strip()
-        
-        # 按照冒号分割字符串
-        parts = raw_text.split(':')
-        
-        if len(parts) == 4:
-            # 格式为 Host:Port:User:Password
-            host, port, user, pwd = parts
-            return f"socks5://{user}:{pwd}@{host}:{port}"
-        elif len(parts) == 2:
-            # 格式为 Host:Port (备用)
-            host, port = parts
-            return f"socks5://{host}:{port}"
+        match = re.search(r'\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}:[0-9]+\b', resp.text)
+        if match:
+            return f"socks5://{match.group()}"
         else:
-            print(f"[-] 代理 API 返回格式未识别: {raw_text}")
+            print(f"[-] 代理 API 返回异常或未匹配到 IP: {resp.text}")
             return None
     except Exception as e:
         print(f"[-] 请求代理 API 失败: {e}")
@@ -118,13 +109,11 @@ class NomadBot:
     def __init__(self, proxy=None):
         self.base_url = "https://api.getnomad.app"
         self.session = requests.Session()
-        
-        # [新增这一行] 强制忽略操作系统的全局代理环境变量，防止本地网络隧道配置干扰
-        self.session.trust_env = False 
+        self.session.trust_env = False # 强制忽略宿主机系统代理干扰
         
         if proxy:
             self.session.proxies = {"http": proxy, "https": proxy}
-            print(f"[*] 已挂载 SOCKS5 代理: {proxy}")
+            print(f"[*] 已挂载 SOCKS5 代理 (已脱敏)")
             
         self.device_id = str(uuid.uuid4())
         self.device_info = random.choice(DEVICE_PROFILES)
@@ -170,14 +159,15 @@ class NomadBot:
         payload = {"email": user['email'], "validation_case": "sign_up"}
         headers = self.session.headers.copy()
         headers.update(self._get_security_headers())
-        resp = self.session.post(url, json=payload, headers=headers, verify=False)
-        if resp.status_code == 200:
-            return "otp_sent"
         try:
+            resp = self.session.post(url, json=payload, headers=headers, verify=False)
+            if resp.status_code == 200:
+                return "otp_sent"
             err = resp.json()
             if err.get("code") == 2002:
                 return self._sign_in(user['email'], user['password'])
-        except: pass
+        except Exception:
+            pass
         return False
 
     def _sign_in(self, email, password):
@@ -223,17 +213,24 @@ class NomadBot:
         headers = self.session.headers.copy()
         headers.update(self._get_security_headers())
         resp = self.session.post(url, json={}, headers=headers, verify=False)
-        if resp.status_code != 200: return None
+        if resp.status_code != 200: 
+            return None
         plans = resp.json().get("data", {}).get("trial_plans")
-        if not plans: return None
+        if not plans: 
+            return None
+        
         offers = []
         for p in plans:
             code = p.get("country_code") or p.get("region_code", "??")
             plan = p.get("plan", {})
+            product = plan.get("product", {})
+            svc = product.get("service", {}).get("data", {})
             offers.append({
                 "code": code,
                 "offer_id": plan.get("id", ""),
-                "name": plan.get("product", {}).get("name", code)
+                "name": product.get("name", code),
+                "data": f"{svc.get('amount', '?')}{svc.get('amount_unit', 'GB')}",
+                "price_usd": plan.get("price", {}).get("USD", {}).get("amount", "0")
             })
         return offers
 
@@ -267,7 +264,8 @@ class NomadBot:
                     'qr_data': esim['qr_data'],
                     'smdp_url': esim['smdp_url']
                 }
-            except: pass
+            except Exception: 
+                pass
         return None
 
 # ================= 中间件与权限校验 =================
@@ -308,7 +306,8 @@ def send_welcome(message):
 
 @bot.message_handler(commands=['admin'])
 def admin_panel(message):
-    if str(message.from_user.id) != str(ADMIN_ID): return
+    if str(message.from_user.id) != str(ADMIN_ID): 
+        return
     markup = InlineKeyboardMarkup()
     status_text = "🟢 运行中 (点击维护)" if sys_state["is_active"] else "🔴 维护中 (点击开启)"
     markup.row(InlineKeyboardButton(status_text, callback_data="admin_toggle_status"))
@@ -358,8 +357,41 @@ def handle_callback_query(call):
         else:
             bot.send_message(user_id, "❌ 接口异常，未提取到有效代理 IP。")
 
+    # 用户自主点击选择套餐的回调路由
+    elif call.data.startswith("select_offer_"):
+        offer_id = call.data.replace("select_offer_", "")
+        client = sys_state["active_sessions"].get(user_id)
+        if not client:
+            bot.answer_callback_query(call.id, "❌ 会话已过期，请重新 /start 提取。", show_alert=True)
+            return
+
+        bot.answer_callback_query(call.id, "⏳ 正在为您创建订单...")
+        bot.edit_message_text(
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            text=f"⏳ 正在为您使用选定的套餐提交兑换订单，请稍候...",
+            parse_mode="Markdown"
+        )
+
+        # 寻找对应的 coverage (country code)
+        coverage = client.temp_plans_map.get(offer_id, "US")
+        master_id = client.step4_create_order(offer_id, coverage)
+        
+        if master_id:
+            bot.send_message(user_id, "🔄 订单处理中，等待5秒提取 eSIM...")
+            time.sleep(5)
+            esim_info = client.step5_get_esim_details(master_id)
+            if esim_info:
+                msg = f"🎉 **eSIM 提取成功！**\n\n🌍 套餐: `{esim_info['plan_name']}`\n📍 ICCID: `{esim_info['iccid']}`\n🔗 LPA: `{esim_info['qr_data']}`\n🌐 SM-DP+: `{esim_info['smdp_url']}`"
+                bot.send_message(user_id, msg, parse_mode="Markdown")
+            else:
+                bot.send_message(user_id, "❌ 获取安装信息失败。")
+        else:
+            bot.send_message(user_id, "❌ 订单创建失败。")
+
 def process_email_step(message):
     email = message.text.strip()
+    user_id = message.from_user.id
     
     bot.send_message(message.chat.id, "🛡️ 正在通过 ipdeep 接口拉取动态代理节点...")
     current_proxy = fetch_dynamic_proxy()
@@ -368,43 +400,65 @@ def process_email_step(message):
         bot.send_message(message.chat.id, "❌ 错误：动态代理 API 拉取失败。可能是余额不足或 IP 白名单限制，请联系管理员。")
         return
         
-    bot.send_message(message.chat.id, f"✅ 成功获取动态节点: `{current_proxy}`\n⏳ 正在生成环境特征并发起请求...", parse_mode="Markdown")
+    bot.send_message(message.chat.id, f"✅ 成功获取动态节点，正在生成环境特征并发起请求...", parse_mode="Markdown")
     
     nomad_bot = NomadBot(proxy=current_proxy)
+    sys_state["active_sessions"][user_id] = nomad_bot
     
     user = nomad_bot.generate_identity(email=email)
+    nomad_bot.temp_user = user
+    
     result = nomad_bot.step1_request_otp(user)
     
-    if result == "otp_sent":
-        msg = bot.send_message(message.chat.id, "✅ 验证码已发送，请直接回复您收到的验证码：")
-        bot.register_next_step_handler(msg, process_otp_step, nomad_bot, user)
+    if result in ["otp_sent", "signed_in"]:
+        msg = bot.send_message(message.chat.id, "✅ 验证码已发送或已直接登录，请直接回复您收到的验证码：")
+        bot.register_next_step_handler(msg, process_otp_step)
     else:
         bot.send_message(message.chat.id, "❌ 发送失败，目标邮箱或网络节点受限。")
 
-def process_otp_step(message, nomad_bot, user):
+def process_otp_step(message):
     code = message.text.strip()
-    bot.send_message(message.chat.id, "⏳ 正在校验并在后台静默申请首个可用 0 元套餐...")
+    user_id = message.from_user.id
+    nomad_bot = sys_state["active_sessions"].get(user_id)
     
-    if nomad_bot.step2_check_otp(user['email'], code) and nomad_bot.step3_sign_up(user, code):
+    if not nomad_bot:
+        bot.send_message(user_id, "❌ 会话已过期，请重新点击【提取 eSIM】。")
+        return
+
+    bot.send_message(message.chat.id, "⏳ 正在校验并登录...")
+    
+    user = nomad_bot.temp_user
+    is_success = False
+    
+    # 检查是否直接走登录或者需要校验验证码并注册
+    if nomad_bot.session.headers.get("Authorization"):
+        is_success = True
+    else:
+        if nomad_bot.step2_check_otp(user['email'], code) and nomad_bot.step3_sign_up(user, code):
+            is_success = True
+
+    if is_success:
+        bot.send_message(message.chat.id, "✅ 登录/注册成功！正在拉取全球可用套餐列表...")
         plans = nomad_bot.step3_5_get_trial_plans()
+        
         if not plans:
             return bot.send_message(message.chat.id, "❌ 未获取到可用试用套餐。")
         
-        plan = plans[0]
-        bot.send_message(message.chat.id, f"✅ 注册成功！\n🌍 正在为您申请: {plan['name']}")
+        # 缓存映射，方便点击回调时取 coverage
+        nomad_bot.temp_plans_map = {p['offer_id']: p['code'] for p in plans}
         
-        master_id = nomad_bot.step4_create_order(plan['offer_id'], plan['code'])
-        if master_id:
-            bot.send_message(message.chat.id, "🔄 订单处理中，等待5秒提取 eSIM...")
-            time.sleep(5)
-            esim_info = nomad_bot.step5_get_esim_details(master_id)
-            if esim_info:
-                msg = f"🎉 **eSIM 提取成功！**\n\n🌍 套餐: `{esim_info['plan_name']}`\n📍 ICCID: `{esim_info['iccid']}`\n🔗 LPA: `{esim_info['qr_data']}`\n🌐 SM-DP+: `{esim_info['smdp_url']}`"
-                bot.send_message(message.chat.id, msg, parse_mode="Markdown")
-            else:
-                bot.send_message(message.chat.id, "❌ 获取安装信息失败。")
-        else:
-            bot.send_message(message.chat.id, "❌ 订单创建失败。")
+        # 动态构建国家/套餐内联按钮键盘
+        markup = InlineKeyboardMarkup()
+        for p in plans:
+            btn_text = f"{p['code']} | {p['name']} ({p['data']} / ${p['price_usd']})"
+            markup.row(InlineKeyboardButton(btn_text, callback_data=f"select_offer_{p['offer_id']}"))
+
+        bot.send_message(
+            user_id,
+            "📋 **请点击选择您需要的国家和套餐：**",
+            reply_markup=markup,
+            parse_mode="Markdown"
+        )
     else:
         bot.send_message(message.chat.id, "❌ 验证码校验失败或注册异常。")
 
