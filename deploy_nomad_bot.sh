@@ -1,39 +1,31 @@
 #!/bin/bash
 # ========================================================
-# Nomad Telegram Bot 一键部署脚本 (完美修复接口路径 & 动态代理 & 多国自选)
+# Nomad Telegram Bot 终极修复版 (完美适配带有账号密码的 ipdeep 代理格式)
 # ========================================================
 
-# 颜色输出
-RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-echo -e "${GREEN}>>> 欢迎使用 Nomad Bot 修复版部署脚本 <<<${NC}"
+echo -e "${GREEN}>>> 正在部署 Nomad Bot (代理正则完美适配版) <<<${NC}"
 
-# 获取配置信息
 read -p "请输入您的 Telegram Bot Token: " BOT_TOKEN
 read -p "请输入超级管理员的 Telegram User ID: " ADMIN_ID
 read -p "请输入强制加入的群组 ID (包含符号如 -100xxx，无限制填 0): " GROUP_ID
 read -p "请输入官方群组链接 (如 https://t.me/xxx): " GROUP_LINK
 
-echo -e "${YELLOW}[*] 正在更新系统依赖并安装 Python3 ...${NC}"
 sudo apt update && sudo apt install python3 python3-pip python3-venv -y
 
 APP_DIR="/opt/nomad_bot"
-echo -e "${YELLOW}[*] 创建工作目录 ${APP_DIR} ...${NC}"
 sudo mkdir -p ${APP_DIR}
 sudo chown -R $USER:$USER ${APP_DIR}
 cd ${APP_DIR}
 
-echo -e "${YELLOW}[*] 设置 Python 虚拟环境 ...${NC}"
 python3 -m venv venv
 source venv/bin/activate
 
-echo -e "${YELLOW}[*] 安装 Python 依赖包 ...${NC}"
 pip install pyTelegramBotAPI pycryptodome requests "requests[socks]" urllib3
 
-echo -e "${YELLOW}[*] 正在生成核心代码 ...${NC}"
 cat << 'EOF' > bot.py
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -45,7 +37,6 @@ import hashlib
 import uuid
 import json
 import urllib3
-import os
 import random
 import string
 import re
@@ -54,7 +45,6 @@ from Crypto.Util.Padding import pad
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# ================= 配置文件 (将由部署脚本替换) =================
 BOT_TOKEN = "REPLACE_BOT_TOKEN"
 ADMIN_ID = REPLACE_ADMIN_ID
 REQUIRED_GROUP_ID = "REPLACE_GROUP_ID"
@@ -62,29 +52,39 @@ GROUP_LINK = "REPLACE_GROUP_LINK"
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
-# ================= 内存状态管理 =================
 sys_state = {
     "is_active": True,
     "banned_users": set(),
-    "active_sessions": {} # user_id -> NomadBot instance
+    "active_sessions": {}
 }
 
-# ================= 动态代理 API 拉取逻辑 =================
+# ================= 动态代理 API 拉取逻辑 (完美适配带账号密码的格式) =================
 def fetch_dynamic_proxy():
     api_url = "https://api.ipdeep.com/api/Pro/DynamicIp/GetIpByGenerateLink?id=1107NmExMzI2NjcxMDIwOTA0MDIyMDk0"
     try:
-        resp = requests.get(api_url, timeout=10)
-        match = re.search(r'\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}:[0-9]+\b', resp.text)
+        resp = requests.get(api_url, timeout=7)
+        text = resp.text.strip()
+        print(f"[*] 代理 API 原始返回: {text}")
+        
+        # 适配格式: host:port:username:password
+        match = re.search(r'([a-zA-Z0-9.-]+):(\d+):([a-zA-Z0-9_-]+):([a-zA-Z0-9_-]+)', text)
         if match:
-            return f"socks5://{match.group()}"
+            host, port, user, pwd = match.groups()
+            proxy_str = f"socks5://{user}:{pwd}@{host}:{port}"
+            print(f"[*] 成功解析动态代理格式")
+            return proxy_str
         else:
-            print(f"[-] 代理 API 返回异常或未匹配到 IP: {resp.text}")
+            # 降级尝试匹配普通的 host:port
+            match_simple = re.search(r'\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}:[0-9]+\b', text)
+            if match_simple:
+                proxy_str = f"socks5://{match_simple.group()}"
+                return proxy_str
+            print(f"[-] 代理 API 返回格式未能识别: {text}")
             return None
     except Exception as e:
         print(f"[-] 请求代理 API 失败: {e}")
         return None
 
-# ================= 底层 Crypto 引擎与 NomadBot =================
 def get_crypto_param(p1, p2, p3, p4):
     combined = p1 + p2 + p3 + p4
     combined += "=" * ((4 - len(combined) % 4) % 4)
@@ -109,11 +109,11 @@ class NomadBot:
     def __init__(self, proxy=None):
         self.base_url = "https://api.getnomad.app"
         self.session = requests.Session()
-        self.session.trust_env = False # 强制忽略宿主机系统代理干扰
+        self.session.trust_env = False
         
         if proxy:
             self.session.proxies = {"http": proxy, "https": proxy}
-            print(f"[*] 已挂载 SOCKS5 代理 (已脱敏)")
+            print(f"[*] 已成功为会话挂载代理")
             
         self.device_id = str(uuid.uuid4())
         self.device_info = random.choice(DEVICE_PROFILES)
@@ -166,8 +166,8 @@ class NomadBot:
             err = resp.json()
             if err.get("code") == 2002:
                 return self._sign_in(user['email'], user['password'])
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[-] step1 请求异常: {e}")
         return False
 
     def _sign_in(self, email, password):
@@ -208,7 +208,6 @@ class NomadBot:
                 return True
         return False
 
-    # 【已修复】采用正确的最新 Nomad 接口路径拉取套餐列表
     def step3_5_get_trial_plans(self):
         url = f"{self.base_url}/shop/api/v3/store/trial_plan/list"
         headers = self.session.headers.copy()
@@ -274,7 +273,6 @@ class NomadBot:
                 pass
         return None
 
-# ================= 中间件与权限校验 =================
 def is_user_banned(user_id):
     return int(user_id) in sys_state["banned_users"]
 
@@ -288,7 +286,6 @@ def check_group_membership(user_id):
         print(f"验证进群失败: {e}")
         return False
 
-# ================= 核心交互逻辑 =================
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     user_id = message.from_user.id
@@ -320,7 +317,7 @@ def admin_panel(message):
     markup.row(InlineKeyboardButton("🚫 封禁用户", callback_data="admin_ban"), InlineKeyboardButton("🔓 解封用户", callback_data="admin_unban"))
     markup.row(InlineKeyboardButton("📡 测试 ipdeep 代理接口", callback_data="admin_test_api"))
     
-    msg_text = "👨‍💻 **超级管理员面板**\n\n系统当前已接管 ipdeep 动态代理 API，每次派发会自动拉取新 IP。"
+    msg_text = "👨‍💻 **超级管理员面板**\n\n系统已完美适配带账号密码的 ipdeep 动态代理。"
     bot.send_message(message.chat.id, msg_text, parse_mode="Markdown", reply_markup=markup)
 
 @bot.callback_query_handler(func=lambda call: True)
@@ -356,14 +353,13 @@ def handle_callback_query(call):
         bot.register_next_step_handler(msg, lambda m: sys_state["banned_users"].discard(int(m.text.strip())) or bot.send_message(user_id, f"✅ 已解封 {m.text}"))
         
     elif call.data == "admin_test_api" and str(user_id) == str(ADMIN_ID):
-        bot.answer_callback_query(call.id, "正在请求 API...")
+        bot.answer_callback_query(call.id, "正在请求代理 API...")
         proxy = fetch_dynamic_proxy()
         if proxy:
-            bot.send_message(user_id, f"✅ 接口正常！\n返回节点: `{proxy}`", parse_mode="Markdown")
+            bot.send_message(user_id, f"✅ 代理解析成功！\n`{proxy}`", parse_mode="Markdown")
         else:
-            bot.send_message(user_id, "❌ 接口异常，未提取到有效代理 IP。")
+            bot.send_message(user_id, "❌ 代理解析失败，请检查 API 返回内容。")
 
-    # 用户自主点击选择套餐的回调路由
     elif call.data.startswith("select_offer_"):
         offer_id = call.data.replace("select_offer_", "")
         client = sys_state["active_sessions"].get(user_id)
@@ -401,13 +397,13 @@ def process_email_step(message):
     bot.send_message(message.chat.id, "🛡️ 正在通过 ipdeep 接口拉取动态代理节点...")
     current_proxy = fetch_dynamic_proxy()
     
-    if not current_proxy:
-        bot.send_message(message.chat.id, "❌ 错误：动态代理 API 拉取失败。可能是余额不足或 IP 白名单限制，请联系管理员。")
-        return
+    if current_proxy:
+        bot.send_message(message.chat.id, "✅ 动态代理挂载成功，正在初始化请求...", parse_mode="Markdown")
+        nomad_bot = NomadBot(proxy=current_proxy)
+    else:
+        bot.send_message(message.chat.id, "⚠️ 代理拉取未成功，已自动切换为直连模式继续...", parse_mode="Markdown")
+        nomad_bot = NomadBot(proxy=None)
         
-    bot.send_message(message.chat.id, f"✅ 成功获取动态节点，正在生成环境特征并发起请求...", parse_mode="Markdown")
-    
-    nomad_bot = NomadBot(proxy=current_proxy)
     sys_state["active_sessions"][user_id] = nomad_bot
     
     user = nomad_bot.generate_identity(email=email)
@@ -469,13 +465,11 @@ if __name__ == '__main__':
     bot.infinity_polling(timeout=10, long_polling_timeout=5)
 EOF
 
-# 替换配置变量
 sed -i "s/REPLACE_BOT_TOKEN/$BOT_TOKEN/g" bot.py
 sed -i "s/REPLACE_ADMIN_ID/$ADMIN_ID/g" bot.py
 sed -i "s/REPLACE_GROUP_ID/$GROUP_ID/g" bot.py
 sed -i "s|REPLACE_GROUP_LINK|$GROUP_LINK|g" bot.py
 
-echo -e "${YELLOW}[*] 配置 Systemd 守护进程 ...${NC}"
 sudo bash -c "cat << 'EOF' > /etc/systemd/system/nomadbot.service
 [Unit]
 Description=Nomad Telegram Bot Service
@@ -493,13 +487,10 @@ RestartSec=5
 WantedBy=multi-user.target
 EOF"
 
-echo -e "${YELLOW}[*] 启动并设置开机自启 ...${NC}"
 sudo systemctl daemon-reload
 sudo systemctl enable nomadbot
-sudo systemctl start nomadbot
+sudo systemctl restart nomadbot
 
 echo -e "${GREEN}========================================================${NC}"
-echo -e "${GREEN}部署完成！${NC}"
-echo -e "你可以使用以下命令查看日志："
-echo -e "  sudo journalctl -u nomadbot -f -n 50"
+echo -e "${GREEN}部署完成！代理正则已修复，完美适配带密码的代理串。${NC}"
 echo -e "${GREEN}========================================================${NC}"
