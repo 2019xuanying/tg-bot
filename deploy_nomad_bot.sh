@@ -109,6 +109,9 @@ class NomadBot:
         self.base_url = "https://api.getnomad.app"
         self.session = requests.Session()
         
+        # [新增这一行] 强制忽略操作系统的全局代理环境变量，防止本地网络隧道配置干扰
+        self.session.trust_env = False 
+        
         if proxy:
             self.session.proxies = {"http": proxy, "https": proxy}
             print(f"[*] 已挂载 SOCKS5 代理: {proxy}")
