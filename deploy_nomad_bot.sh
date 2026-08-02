@@ -73,11 +73,21 @@ def fetch_dynamic_proxy():
     api_url = "https://api.ipdeep.com/api/Pro/DynamicIp/GetIpByGenerateLink?id=1107NmExMzI2NjcxMDIwOTA0MDIyMDk0"
     try:
         resp = requests.get(api_url, timeout=10)
-        match = re.search(r'\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}:[0-9]+\b', resp.text)
-        if match:
-            return f"socks5://{match.group()}"
+        raw_text = resp.text.strip()
+        
+        # 按照冒号分割字符串
+        parts = raw_text.split(':')
+        
+        if len(parts) == 4:
+            # 格式为 Host:Port:User:Password
+            host, port, user, pwd = parts
+            return f"socks5://{user}:{pwd}@{host}:{port}"
+        elif len(parts) == 2:
+            # 格式为 Host:Port (备用)
+            host, port = parts
+            return f"socks5://{host}:{port}"
         else:
-            print(f"[-] 代理 API 返回异常或未匹配到 IP: {resp.text}")
+            print(f"[-] 代理 API 返回格式未识别: {raw_text}")
             return None
     except Exception as e:
         print(f"[-] 请求代理 API 失败: {e}")
